@@ -7,12 +7,12 @@ import (
 )
 
 func init() {
-	rootCmd.AddCommand(echoCmd)
+	rootCmd.AddCommand(commitCmd)
 }
 
-var echoCmd = &cobra.Command{
-	Use:   "echo [text]",
-	Short: "Prints the provided text",
+var commitCmd = &cobra.Command{
+	Use:   "commit [text]",
+	Short: "Create a commit message from the given diff",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(cmd.OutOrStdout(), args[0])
