@@ -1,10 +1,9 @@
 package main
 
 import (
-	"fmt"
+	"devmate/cli"
 )
 
 func main() {
-	s := "gopher"
-	fmt.Printf("Hello and welcome, %s!\n", s)
+	cli.Execute()
 }
