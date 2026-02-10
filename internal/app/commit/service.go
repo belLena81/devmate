@@ -1,13 +1,13 @@
 package commit
 
-import "github.com/belLena81/devmate/domain"
+import "devmate/internal/domain"
 
 type Service struct {
 	Git domain.GitClient
 	LLM domain.LLM
 }
 
-/*func (s *Service) DraftMessage() (string, error) {
+func (s *Service) DraftMessage() (string, error) {
 	diff, err := s.Git.DiffCached()
 	if err != nil {
 		return "", err
@@ -15,4 +15,8 @@ type Service struct {
 
 	prompt := BuildCommitPrompt(diff)
 	return s.LLM.Generate(prompt)
-}*/
+}
+
+func BuildCommitPrompt(diff string) string {
+	return diff
+}
