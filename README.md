@@ -73,17 +73,14 @@ This is a drafting tool, not an agent with authority.
 
 Devmate follows a Clean Architecture approach to enforce safety and maintainability.
 
-`cmd/            CLI entrypoint`
-
-`internal/`
-
-`cli/          Cobra commands and UX`
-
-`app/          Use-case orchestration`
-
-`domain/       Core interfaces and prompts`
-
-`infra/        Git and LLM implementations`
+```
+cmd/            CLI entrypoint
+internal/
+cli/          Cobra commands and UX
+app/          Use-case orchestration
+domain/       Core interfaces and prompts
+infra/        Git and LLM implementations
+```
 
 ### Key Boundaries
 
@@ -109,11 +106,11 @@ Requires:
 
 ## Development
 
-`git clone https://github.com/belLena81/devmate`
-
-`cd devmate`
-
-`go build ./cmd/devmate`
+```
+git clone https://github.com/belLena81/devmate
+cd devmate
+go build ./cmd/devmate
+```
 
 
 ## Code Style
