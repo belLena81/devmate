@@ -1,4 +1,4 @@
-package commit
+package service
 
 import (
 	"errors"
