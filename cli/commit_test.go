@@ -21,6 +21,10 @@ func resetFlags() {
 		f.Value.Set(f.DefValue)
 		f.Changed = false
 	})
+	prCmd.Flags().VisitAll(func(f *pflag.Flag) {
+		f.Value.Set(f.DefValue)
+		f.Changed = false
+	})
 }
 
 func TestCommitCmd_IsRegistered(t *testing.T) {

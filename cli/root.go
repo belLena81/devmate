@@ -10,6 +10,10 @@ import (
 var rootCmd = &cobra.Command{
 	Use:   "devmate",
 	Short: "Devmate is a read-only developer assistant",
+	Long: `devmate is a CLI tool that streamlines common development workflows.
+
+It helps you standardize commits, create branches from JIRA tickets,
+and open pull requests with consistent naming conventions.`,
 }
 
 type Options struct {
@@ -76,6 +80,9 @@ var cmdTypes = [5]string{"feat", "fix", "chore", "docs", "refactor"}
 
 var ErrInvalidCmdType = fmt.Errorf("invalid commit type, must be one of %v", cmdTypes)
 var MissingTaskDescription = fmt.Errorf("missing task description")
+var MissingSourceBranch = fmt.Errorf("missing source branch")
+var MissingTargetBranch = fmt.Errorf("missing target branch")
+var BranchDoesNotExist = fmt.Errorf("branch does not exist")
 
 func (m CmdMode) String() string {
 	switch m {
@@ -84,6 +91,10 @@ func (m CmdMode) String() string {
 	default:
 		return "short"
 	}
+}
+
+func init() {
+	rootCmd.CompletionOptions.DisableDefaultCmd = true
 }
 
 func Execute() {
