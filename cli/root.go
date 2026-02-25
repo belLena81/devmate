@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -16,9 +17,6 @@ var (
 	explain     bool
 	rawShort    bool
 	rawDetailed bool
-
-	cmdType CmdType
-	mode    CmdMode
 )
 
 type CmdType int
@@ -30,22 +28,25 @@ const (
 	Chore
 	Docs
 	Refactor
+	cmdTypeSentinel // cmdTypeSentinel marks the end of the valid CmdType constants.
 )
 
-func (t CmdType) String() string {
+func (t CmdType) String() (string, error) {
 	switch t {
+	case Undefined:
+		return "", nil
 	case Feat:
-		return "feat"
+		return "feat", nil
 	case Fix:
-		return "fix"
+		return "fix", nil
 	case Chore:
-		return "chore"
+		return "chore", nil
 	case Docs:
-		return "docs"
+		return "docs", nil
 	case Refactor:
-		return "refactor"
+		return "refactor", nil
 	default:
-		return ""
+		return "", ErrInvalidCmdType
 	}
 }
 
@@ -55,6 +56,19 @@ const (
 	Short CmdMode = iota
 	Detailed
 )
+
+var cmdTypeIndex = func() map[string]CmdType {
+	index := make(map[string]CmdType)
+	for t := Undefined; t < cmdTypeSentinel; t++ {
+		str, _ := t.String()
+		index[str] = t
+	}
+	return index
+}()
+
+var cmdTypes = [5]string{"feat", "fix", "chore", "docs", "refactor"}
+
+var ErrInvalidCmdType = fmt.Errorf("invalid commit type, must be one of %v", cmdTypes)
 
 func (m CmdMode) String() string {
 	switch m {

@@ -6,6 +6,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type CommitOptions struct {
+	Type    CmdType
+	Mode    CmdMode
+	Explain bool
+}
+
+var CommitOpts CommitOptions
+
 func init() {
 	rootCmd.AddCommand(commitCmd)
 	commitCmd.Example = `
@@ -72,8 +80,36 @@ Note:
   If neither is provided, a short format is used.
 `,
 	Args: cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Fprintln(cmd.OutOrStdout(), args[0])
-		return nil
-	},
+	RunE: validateAndRunCommit,
+}
+
+func parseCmdType(raw string) (CmdType, error) {
+	cmdType, ok := cmdTypeIndex[raw]
+	if !ok {
+		return Undefined, ErrInvalidCmdType
+	}
+	return cmdType, nil
+}
+
+func parseCmdMode(detailed bool) CmdMode {
+	if detailed {
+		return Detailed
+	}
+	return Short
+}
+
+func validateAndRunCommit(cmd *cobra.Command, args []string) error {
+	//validate type and prepare options
+	ct, err := parseCmdType(rawCmdType)
+	if err != nil {
+		return err
+	}
+	CommitOpts = CommitOptions{
+		Type:    ct,
+		Mode:    parseCmdMode(rawDetailed),
+		Explain: explain,
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), args)
+	//call service to run a command
+	return nil
 }
