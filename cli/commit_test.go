@@ -1,41 +1,47 @@
 package cli
 
 import (
-	"bytes"
-	"fmt"
 	"testing"
-
-	"github.com/spf13/cobra"
 )
 
-func newEchoCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:  "echo [text]",
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			fmt.Fprintln(cmd.OutOrStdout(), args[0])
-			return nil
-		},
+func TestCommitCmd_IsRegistered(t *testing.T) {
+	cmd, _, err := rootCmd.Find([]string{"commit"})
+	if err != nil || cmd.Name() != "commit" {
+		t.Fatal("commit command not registered")
 	}
 }
 
-func TestEchoCommand(t *testing.T) {
-	buf := new(bytes.Buffer)
+func TestCommitCmd_Flags(t *testing.T) {
+	f := commitCmd.Flags()
 
-	root := &cobra.Command{
-		Use: "devmate",
+	if f.Lookup("type") == nil {
+		t.Error("missing --type flag")
 	}
-
-	root.SetOut(buf)
-	root.SetArgs([]string{"echo", "hello"})
-	root.AddCommand(newEchoCmd())
-
-	err := root.Execute()
-	if err != nil {
-		t.Fatal(err)
+	if f.Lookup("explain") == nil {
+		t.Error("missing --explain flag")
 	}
+	if f.Lookup("short") == nil {
+		t.Error("missing --short flag")
+	}
+	if f.Lookup("detailed") == nil {
+		t.Error("missing --detailed flag")
+	}
+}
 
-	if buf.String() != "hello\n" {
-		t.Fatalf("unexpected output: %q", buf.String())
+func TestCommitCmd_FlagDefaults(t *testing.T) {
+	if commitCmd.Flags().Lookup("type").DefValue != "" {
+		t.Error("--type default should be empty string")
+	}
+	if commitCmd.Flags().Lookup("explain").DefValue != "false" {
+		t.Error("--explain default should be false")
+	}
+}
+
+func TestCommitCmd_ShortAndDetailedMutuallyExclusive(t *testing.T) {
+	rootCmd.SetArgs([]string{"commit", "--short", "--detailed"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+	err := rootCmd.Execute()
+	if err == nil {
+		t.Error("expected error when --short and --detailed used together")
 	}
 }
