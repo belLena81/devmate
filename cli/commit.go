@@ -7,21 +7,22 @@ import (
 )
 
 type CommitOptions struct {
-	Type    CmdType
-	Mode    CmdMode
-	Explain bool
+	Options
+}
+
+func NewCommit(cmdType string, short, detailed, explain bool) (CommitOptions, error) {
+	ct, err := parseCmdType(cmdType)
+	if err != nil {
+		return CommitOptions{}, err
+	}
+	return CommitOptions{Options{ct, parseCmdMode(detailed), explain}}, nil
 }
 
 var CommitOpts CommitOptions
 
 func init() {
 	rootCmd.AddCommand(commitCmd)
-	commitCmd.Example = `
-  devmate commit
-  devmate commit -t feat
-  devmate commit --type fix --short
-  devmate commit --detailed --explain
-`
+
 	commitCmd.Flags().StringVarP(
 		&rawCmdType,
 		"type",
@@ -56,7 +57,7 @@ func init() {
 }
 
 var commitCmd = &cobra.Command{
-	Use:   "commit [text]",
+	Use:   "commit [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain]",
 	Short: "Create a commit message from the given diff",
 	Long: `Analyzes staged changes (git diff --cached) and drafts a Conventional Commit message.
 
@@ -100,16 +101,12 @@ func parseCmdMode(detailed bool) CmdMode {
 
 func validateAndRunCommit(cmd *cobra.Command, args []string) error {
 	//validate type and prepare options
-	ct, err := parseCmdType(rawCmdType)
+	var err error
+	CommitOpts, err = NewCommit(rawCmdType, rawShort, rawDetailed, explain)
 	if err != nil {
 		return err
 	}
-	CommitOpts = CommitOptions{
-		Type:    ct,
-		Mode:    parseCmdMode(rawDetailed),
-		Explain: explain,
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), args)
+	fmt.Fprintln(cmd.OutOrStdout(), CommitOpts)
 	//call service to run a command
 	return nil
 }

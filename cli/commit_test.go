@@ -17,6 +17,10 @@ func resetFlags() {
 		f.Value.Set(f.DefValue)
 		f.Changed = false
 	})
+	branchCmd.Flags().VisitAll(func(f *pflag.Flag) {
+		f.Value.Set(f.DefValue)
+		f.Changed = false
+	})
 }
 
 func TestCommitCmd_IsRegistered(t *testing.T) {
@@ -121,5 +125,15 @@ func TestCommitCmd_ValidTypes(t *testing.T) {
 				t.Errorf("unexpected error for type %q: %v", tt, err)
 			}
 		})
+	}
+}
+
+func TestNewCommit_ValidType(t *testing.T) {
+	opts, err := NewCommit("feat", false, false, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.Type != Feat {
+		t.Errorf("expected Feat, got %v", opts.Type)
 	}
 }

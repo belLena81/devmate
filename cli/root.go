@@ -12,6 +12,12 @@ var rootCmd = &cobra.Command{
 	Short: "Devmate is a read-only developer assistant",
 }
 
+type Options struct {
+	Type    CmdType
+	Mode    CmdMode
+	Explain bool
+}
+
 var (
 	rawCmdType  string
 	explain     bool
@@ -69,6 +75,7 @@ var cmdTypeIndex = func() map[string]CmdType {
 var cmdTypes = [5]string{"feat", "fix", "chore", "docs", "refactor"}
 
 var ErrInvalidCmdType = fmt.Errorf("invalid commit type, must be one of %v", cmdTypes)
+var MissingTaskDescription = fmt.Errorf("missing task description")
 
 func (m CmdMode) String() string {
 	switch m {
