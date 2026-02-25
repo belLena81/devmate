@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"devmate/internal/domain"
 	"errors"
 	"testing"
 )
@@ -100,7 +101,7 @@ func TestBranchCmd_InvalidType(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for invalid --type value")
 	}
-	if !errors.Is(err, ErrInvalidCmdType) {
+	if !errors.Is(err, domain.ErrInvalidCmdType) {
 		t.Errorf("expected ErrInvalidCmdType, got %v", err)
 	}
 }
@@ -123,7 +124,7 @@ func TestBranchCmd_ValidTypes(t *testing.T) {
 
 func TestNewBranch_MissingTask(t *testing.T) {
 	_, err := NewBranch("", "", false, false, false)
-	if !errors.Is(err, MissingTaskDescription) {
+	if !errors.Is(err, domain.MissingTaskDescription) {
 		t.Errorf("expected MissingTaskDescription, got %v", err)
 	}
 }

@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"devmate/internal/domain"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/spf13/pflag"
@@ -86,11 +88,12 @@ func TestCommitCmd_RejectsPositionalArgs(t *testing.T) {
 }
 
 func TestCommitCmd_RunsWithoutArgs(t *testing.T) {
-	rootCmd.SetArgs([]string{"commit"})
 	t.Cleanup(func() {
 		rootCmd.SetArgs(nil)
 		resetFlags()
 	})
+	rootCmd.SetArgs([]string{"commit"})
+	cmdService = &fakeCommitService{}
 
 	err := rootCmd.Execute()
 	if err != nil {
@@ -111,7 +114,7 @@ func TestCommitCmd_InvalidType(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for invalid --type value")
 	}
-	if !errors.Is(err, ErrInvalidCmdType) {
+	if !errors.Is(err, domain.ErrInvalidCmdType) {
 		t.Errorf("expected ErrInvalidCmdType, got %v", err)
 	}
 }
@@ -137,7 +140,62 @@ func TestNewCommit_ValidType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if opts.Type != Feat {
+	if opts.Type != domain.Feat {
 		t.Errorf("expected Feat, got %v", opts.Type)
+	}
+}
+
+func TestRunCommit_PrintsGeneratedMessage(t *testing.T) {
+	var buf bytes.Buffer
+	rootCmd.SetOut(&buf)
+	t.Cleanup(func() { rootCmd.SetOut(nil) })
+
+	// inject fake service
+	cmdService = &fakeCommitService{
+		response: "feat(auth): add token refresh",
+	}
+	t.Cleanup(func() { cmdService = nil })
+
+	rootCmd.SetArgs([]string{"commit"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(buf.String(), "feat(auth): add token refresh") {
+		t.Errorf("expected commit message in output, got: %q", buf.String())
+	}
+}
+
+func TestRunCommit_ServiceError_ReturnsError(t *testing.T) {
+	cmdService = &fakeCommitService{
+		err: errors.New("git failed"),
+	}
+	t.Cleanup(func() { cmdService = nil })
+
+	rootCmd.SetArgs([]string{"commit"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+
+	if err := rootCmd.Execute(); err == nil {
+		t.Error("expected error to propagate from service")
+	}
+}
+
+func TestRunCommit_PassesFlagsToService(t *testing.T) {
+	fake := &fakeCommitService{}
+	cmdService = fake
+	t.Cleanup(func() { cmdService = nil })
+
+	rootCmd.SetArgs([]string{"commit", "--type", "fix", "--detailed"})
+	t.Cleanup(func() { rootCmd.SetArgs(nil) })
+
+	rootCmd.Execute()
+
+	if fake.options.Type != domain.Fix {
+		t.Error("expected Fix type to be passed to service")
+	}
+	if fake.options.Mode != domain.Detailed {
+		t.Error("expected Detailed mode to be passed to service")
 	}
 }

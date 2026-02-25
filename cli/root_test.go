@@ -1,12 +1,15 @@
 package cli
 
-import "testing"
+import (
+	"devmate/internal/domain"
+	"testing"
+)
 
 func TestParseCmdMode(t *testing.T) {
-	if parseCmdMode(true) != Detailed {
+	if parseCmdMode(true) != domain.Detailed {
 		t.Error("expected Detailed")
 	}
-	if parseCmdMode(false) != Short {
+	if parseCmdMode(false) != domain.Short {
 		t.Error("expected Short")
 	}
 }
@@ -18,8 +21,8 @@ func TestParseValidCmdType(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-		if parsedCmdType != cmdTypeIndex[tt] {
-			t.Error("expected ", cmdTypeIndex[tt], "got", parsedCmdType)
+		if parsedCmdType != domain.CmdTypeIndex[tt] {
+			t.Error("expected ", domain.CmdTypeIndex[tt], "got", parsedCmdType)
 		}
 	}
 }

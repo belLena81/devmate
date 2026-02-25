@@ -1,27 +1,24 @@
 package cli
 
 import (
+	"devmate/internal/domain"
+	"devmate/internal/service"
 	"fmt"
 
 	"github.com/spf13/cobra"
 )
 
-type BranchOptions struct {
-	Task string
-	Options
-}
+var BranchOpts service.BranchOptions
 
-var BranchOpts BranchOptions
-
-func NewBranch(task string, cmdType string, short, detailed, explain bool) (BranchOptions, error) {
+func NewBranch(task string, cmdType string, short, detailed, explain bool) (service.BranchOptions, error) {
 	ct, err := parseCmdType(cmdType)
 	if err != nil {
-		return BranchOptions{}, err
+		return service.BranchOptions{}, err
 	}
 	if task == "" {
-		return BranchOptions{}, MissingTaskDescription
+		return service.BranchOptions{}, domain.MissingTaskDescription
 	}
-	return BranchOptions{task, Options{ct, parseCmdMode(detailed), explain}}, nil
+	return service.BranchOptions{task, domain.Options{ct, parseCmdMode(detailed), explain}}, nil
 }
 
 var branchCmd = &cobra.Command{

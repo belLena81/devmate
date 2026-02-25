@@ -1,31 +1,27 @@
 package cli
 
 import (
+	"devmate/internal/domain"
+	"devmate/internal/service"
 	"fmt"
 
 	"github.com/spf13/cobra"
 )
 
-type PrOptions struct {
-	SourceBranch      string
-	DestinationBranch string
-	Options
-}
+var PrOpts service.PrOptions
 
-var PrOpts PrOptions
-
-func NewPr(source, target string, cmdType string, short, detailed, explain bool) (PrOptions, error) {
+func NewPr(source, target string, cmdType string, short, detailed, explain bool) (service.PrOptions, error) {
 	ct, err := parseCmdType(cmdType)
 	if err != nil {
-		return PrOptions{}, err
+		return service.PrOptions{}, err
 	}
 	if source == "" {
-		return PrOptions{}, MissingSourceBranch
+		return service.PrOptions{}, domain.MissingSourceBranch
 	}
 	if target == "" {
-		return PrOptions{}, MissingTargetBranch
+		return service.PrOptions{}, domain.MissingTargetBranch
 	}
-	return PrOptions{source, target, Options{ct, parseCmdMode(detailed), explain}}, nil
+	return service.PrOptions{source, target, domain.Options{ct, parseCmdMode(detailed), explain}}, nil
 }
 
 var prCmd = &cobra.Command{

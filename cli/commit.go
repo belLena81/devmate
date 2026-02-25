@@ -1,24 +1,37 @@
 package cli
 
 import (
+	"devmate/internal/domain"
+	"devmate/internal/service"
 	"fmt"
 
 	"github.com/spf13/cobra"
 )
 
-type CommitOptions struct {
-	Options
-}
-
-func NewCommit(cmdType string, short, detailed, explain bool) (CommitOptions, error) {
+func NewCommit(cmdType string, short, detailed, explain bool) (service.CommitOptions, error) {
 	ct, err := parseCmdType(cmdType)
 	if err != nil {
-		return CommitOptions{}, err
+		return service.CommitOptions{}, err
 	}
-	return CommitOptions{Options{ct, parseCmdMode(detailed), explain}}, nil
+	return service.CommitOptions{domain.Options{ct, parseCmdMode(detailed), explain}}, nil
 }
 
-var CommitOpts CommitOptions
+var commitOpts service.CommitOptions
+
+type CommitService interface {
+	DraftMessage(opt service.CommitOptions) (string, error)
+}
+
+type fakeCommitService struct {
+	response string
+	err      error
+	options  service.CommitOptions
+}
+
+func (f *fakeCommitService) DraftMessage(o service.CommitOptions) (string, error) {
+	f.options = o
+	return f.response, f.err
+}
 
 func init() {
 	rootCmd.AddCommand(commitCmd)
@@ -84,29 +97,36 @@ Note:
 	RunE: validateAndRunCommit,
 }
 
-func parseCmdType(raw string) (CmdType, error) {
-	cmdType, ok := cmdTypeIndex[raw]
+func parseCmdType(raw string) (domain.CmdType, error) {
+	cmdType, ok := domain.CmdTypeIndex[raw]
 	if !ok {
-		return Undefined, ErrInvalidCmdType
+		return domain.Undefined, domain.ErrInvalidCmdType
 	}
 	return cmdType, nil
 }
 
-func parseCmdMode(detailed bool) CmdMode {
+func parseCmdMode(detailed bool) domain.CmdMode {
 	if detailed {
-		return Detailed
+		return domain.Detailed
 	}
-	return Short
+	return domain.Short
 }
 
 func validateAndRunCommit(cmd *cobra.Command, args []string) error {
 	//validate type and prepare options
 	var err error
-	CommitOpts, err = NewCommit(rawCmdType, rawShort, rawDetailed, explain)
+	commitOpts, err = NewCommit(rawCmdType, rawShort, rawDetailed, explain)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), CommitOpts)
-	//call service to run a command
+	if cmdService == nil {
+		// real construction — wired once you have infra ready
+		return domain.ServiceNotInitialized
+	}
+	msg, err := cmdService.DraftMessage(commitOpts)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), msg)
 	return nil
 }

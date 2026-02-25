@@ -45,7 +45,9 @@ func TestCommitService_DraftsMessage(t *testing.T) {
 		},
 	}
 
-	msg, err := svc.DraftMessage()
+	opts := CommitOptions{}
+
+	msg, err := svc.DraftMessage(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +70,9 @@ func TestCommitService_PassesDiffToLLM(t *testing.T) {
 		},
 	}
 
-	_, _ = svc.DraftMessage()
+	opts := CommitOptions{}
+
+	_, _ = svc.DraftMessage(opts)
 
 	if !strings.Contains(receivedPrompt, "STAGED DIFF") {
 		t.Fatal("diff not included in prompt")
@@ -94,7 +98,9 @@ func TestCommitService_GitError(t *testing.T) {
 		LLM: &fakeLLM{},
 	}
 
-	_, err := svc.DraftMessage()
+	opts := CommitOptions{}
+
+	_, err := svc.DraftMessage(opts)
 	if err == nil {
 		t.Fatal("expected error")
 	}

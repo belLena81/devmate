@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"devmate/internal/domain"
 	"errors"
 	"testing"
 )
@@ -111,7 +112,7 @@ func TestPrCmd_InvalidType(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for invalid --type value")
 	}
-	if !errors.Is(err, ErrInvalidCmdType) {
+	if !errors.Is(err, domain.ErrInvalidCmdType) {
 		t.Errorf("expected ErrInvalidCmdType, got %v", err)
 	}
 }
@@ -134,14 +135,14 @@ func TestPrCmd_ValidTypes(t *testing.T) {
 
 func TestNewPr_MissingTarget(t *testing.T) {
 	_, err := NewPr("source", "", "", true, false, false)
-	if !errors.Is(err, MissingTargetBranch) {
+	if !errors.Is(err, domain.MissingTargetBranch) {
 		t.Errorf("expected MissingTargetBranch, got %v", err)
 	}
 }
 
 func TestNewPr_MissingSource(t *testing.T) {
 	_, err := NewPr("", "target", "", true, false, false)
-	if !errors.Is(err, MissingSourceBranch) {
+	if !errors.Is(err, domain.MissingSourceBranch) {
 		t.Errorf("expected MissingSourceBranch, got %v", err)
 	}
 }
@@ -154,14 +155,14 @@ func TestNewPr_ValidConstruction(t *testing.T) {
 	if opts.SourceBranch != "main" || opts.DestinationBranch != "feature/foo" {
 		t.Error("branch names not set correctly")
 	}
-	if opts.Type != Feat {
+	if opts.Type != domain.Feat {
 		t.Error("type not set correctly")
 	}
 }
 
 func TestNewPr_InvalidType(t *testing.T) {
 	_, err := NewPr("main", "feature/foo", "invalid", false, false, false)
-	if !errors.Is(err, ErrInvalidCmdType) {
+	if !errors.Is(err, domain.ErrInvalidCmdType) {
 		t.Errorf("expected ErrInvalidCmdType, got %v", err)
 	}
 }
