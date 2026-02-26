@@ -1,8 +1,8 @@
-// cli/app.go
 package cli
 
 import (
 	"devmate/internal/domain"
+	"devmate/internal/infra/git"
 	"devmate/internal/service"
 	"log/slog"
 	"os"
@@ -17,11 +17,20 @@ type App struct {
 	prService     PrService
 }
 
-func NewApp(git domain.GitClient, llm domain.LLM) *App {
+func NewApp(llm domain.LLM) *App {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		Level: slog.LevelDebug,
 	}))
-	svc := &service.Service{Git: git, LLM: llm, Log: log}
+
+	repoRoot, err := git.RepoRoot()
+	if err != nil {
+		log.Error("failed to find git repo root", "error", err)
+		os.Exit(1)
+	}
+
+	runner := git.New(repoRoot, log)
+	svc := service.New(runner, llm, log)
+
 	app := &App{
 		commitService: svc,
 		branchService: svc,

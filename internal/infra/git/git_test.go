@@ -2,12 +2,18 @@ package git_test
 
 import (
 	"devmate/internal/infra/git"
+	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func noopLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
 
 // newTestRepo creates a real temporary git repository and returns its path.
 func newTestRepo(t *testing.T) string {
@@ -91,7 +97,7 @@ func TestDiffCached_ReturnsStagedChanges(t *testing.T) {
 	dir := newTestRepo(t)
 	stageFile(t, dir, "hello.go", "package main\n")
 
-	runner := git.New(dir)
+	runner := git.New(dir, noopLogger())
 	diff, err := runner.DiffCached()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -108,7 +114,7 @@ func TestDiffCached_EmptyWhenNothingStaged(t *testing.T) {
 	dir := newTestRepo(t)
 	os.WriteFile(filepath.Join(dir, "unstaged.go"), []byte("package main\n"), 0644)
 
-	runner := git.New(dir)
+	runner := git.New(dir, noopLogger())
 	diff, err := runner.DiffCached()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -119,7 +125,7 @@ func TestDiffCached_EmptyWhenNothingStaged(t *testing.T) {
 }
 
 func TestDiffCached_ErrorOutsideGitRepo(t *testing.T) {
-	runner := git.New(t.TempDir())
+	runner := git.New(t.TempDir(), noopLogger())
 	_, err := runner.DiffCached()
 	if err == nil {
 		t.Fatal("expected error when run outside a git repo")
@@ -143,7 +149,7 @@ func TestLogBetween_ReturnsOnlyFeatureBranchCommits(t *testing.T) {
 	stageFile(t, dir, "c.go", "// c\n")
 	commitAll(t, dir, "commit 3")
 
-	runner := git.New(dir)
+	runner := git.New(dir, noopLogger())
 	msgs, err := runner.LogBetween(base, "feature/foo")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -183,7 +189,7 @@ func TestLogBetween_ExcludesMergeCommits(t *testing.T) {
 	stageFile(t, dir, "c.go", "// c\n")
 	commitAll(t, dir, "commit 3")
 
-	runner := git.New(dir)
+	runner := git.New(dir, noopLogger())
 	msgs, err := runner.LogBetween(base, "feature/foo")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -211,7 +217,7 @@ func TestLogBetween_EmptyWhenNoUniqueCommits(t *testing.T) {
 	// feature branch with no additional commits
 	checkoutBranch(t, dir, "feature/empty")
 
-	runner := git.New(dir)
+	runner := git.New(dir, noopLogger())
 	msgs, err := runner.LogBetween(base, "feature/empty")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -226,7 +232,7 @@ func TestLogBetween_ErrorOnUnknownBranch(t *testing.T) {
 	stageFile(t, dir, "main.go", "package main\n")
 	commitAll(t, dir, "initial commit")
 
-	runner := git.New(dir)
+	runner := git.New(dir, noopLogger())
 	_, err := runner.LogBetween("HEAD", "nonexistent-branch")
 	if err == nil {
 		t.Fatal("expected error for unknown branch")
@@ -234,7 +240,7 @@ func TestLogBetween_ErrorOnUnknownBranch(t *testing.T) {
 }
 
 func TestLogBetween_ErrorOutsideGitRepo(t *testing.T) {
-	runner := git.New(t.TempDir())
+	runner := git.New(t.TempDir(), noopLogger())
 	_, err := runner.LogBetween("main", "feature")
 	if err == nil {
 		t.Fatal("expected error when run outside a git repo")

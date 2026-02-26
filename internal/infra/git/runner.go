@@ -3,25 +3,46 @@ package git
 import (
 	"bytes"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 )
 
-// Runner executes git commands in a specific working directory
+// Runner executes git commands in a specific working directory.
+// It implements domain.GitClient.
 type Runner struct {
 	dir string
+	log *slog.Logger
 }
 
 // New returns a Runner rooted at dir. Pass an empty string to use the
 // current working directory.
-func New(dir string) *Runner {
-	return &Runner{dir: dir}
+func New(dir string, log *slog.Logger) *Runner {
+	return &Runner{
+		dir: dir,
+		log: log.With("component", "git"),
+	}
+}
+
+func RepoRoot() (string, error) {
+	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
+	if err != nil {
+		return "", fmt.Errorf("not inside a git repository")
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // DiffCached returns the output of `git diff --cached` — the staged diff.
 // Returns an empty string (and no error) when nothing is staged.
 func (r *Runner) DiffCached() (string, error) {
-	return r.run("diff", "--cached")
+	r.log.Debug("running diff --cached")
+	out, err := r.run("diff", "--cached")
+	if err != nil {
+		r.log.Error("diff --cached failed", "error", err)
+		return "", err
+	}
+	r.log.Debug("diff --cached completed", "bytes", len(out))
+	return out, nil
 }
 
 // LogBetween returns the commit subject lines that exist in head but not in
@@ -29,6 +50,7 @@ func (r *Runner) DiffCached() (string, error) {
 // summarisation without noise from merge-back commits.
 // Returns an empty slice (and no error) when base and head are identical.
 func (r *Runner) LogBetween(base, head string) ([]string, error) {
+	r.log.Debug("running log between", "base", base, "head", head)
 	out, err := r.run(
 		"log",
 		fmt.Sprintf("%s..%s", base, head),
@@ -37,16 +59,20 @@ func (r *Runner) LogBetween(base, head string) ([]string, error) {
 		"--format=%s",
 	)
 	if err != nil {
+		r.log.Error("log between failed", "base", base, "head", head, "error", err)
 		return nil, err
 	}
 	out = strings.TrimSpace(out)
 	if out == "" {
+		r.log.Debug("log between returned no commits", "base", base, "head", head)
 		return []string{}, nil
 	}
-	return strings.Split(out, "\n"), nil
+	msgs := strings.Split(out, "\n")
+	r.log.Debug("log between completed", "base", base, "head", head, "commits", len(msgs))
+	return msgs, nil
 }
 
-// run executes a git subcommand in r.dir and returns combined stdout.
+// run executes a git subcommand in r.dir and returns stdout.
 // stderr is captured and included in the error message on failure so
 // callers get actionable context without needing to inspect os.Stderr.
 func (r *Runner) run(args ...string) (string, error) {

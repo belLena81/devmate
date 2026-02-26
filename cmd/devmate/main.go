@@ -7,9 +7,8 @@ import (
 )
 
 func main() {
-	git := infra.NewGitClient()
 	llm := infra.NewOllamaClient()
-	app := cli.NewApp(git, llm)
+	app := cli.NewApp(llm)
 	if err := app.Execute(); err != nil {
 		os.Exit(1)
 	}

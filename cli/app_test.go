@@ -44,14 +44,14 @@ func (s *stubLLM) Generate(prompt string) (string, error) {
 // ---------------------------------------------------------------------------
 
 func TestNewApp_ReturnsNonNilApp(t *testing.T) {
-	app := cli.NewApp(&stubGit{}, &stubLLM{})
+	app := cli.NewApp(&stubLLM{})
 	if app == nil {
 		t.Fatal("NewApp returned nil")
 	}
 }
 
 func TestApp_RootCmd_IsNamed_devmate(t *testing.T) {
-	app := cli.NewApp(&stubGit{}, &stubLLM{})
+	app := cli.NewApp(&stubLLM{})
 	if app.RootCmd().Name() != "devmate" {
 		t.Errorf("expected root command name %q, got %q", "devmate", app.RootCmd().Name())
 	}
@@ -62,7 +62,7 @@ func TestApp_RootCmd_IsNamed_devmate(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestApp_CommitCmd_IsRegistered(t *testing.T) {
-	app := cli.NewApp(&stubGit{}, &stubLLM{})
+	app := cli.NewApp(&stubLLM{})
 	cmd, _, err := app.RootCmd().Find([]string{"commit"})
 	if err != nil || cmd.Name() != "commit" {
 		t.Fatal("commit command not registered on App")
@@ -70,7 +70,7 @@ func TestApp_CommitCmd_IsRegistered(t *testing.T) {
 }
 
 func TestApp_BranchCmd_IsRegistered(t *testing.T) {
-	app := cli.NewApp(&stubGit{}, &stubLLM{})
+	app := cli.NewApp(&stubLLM{})
 	cmd, _, err := app.RootCmd().Find([]string{"branch"})
 	if err != nil || cmd.Name() != "branch" {
 		t.Fatal("branch command not registered on App")
@@ -78,7 +78,7 @@ func TestApp_BranchCmd_IsRegistered(t *testing.T) {
 }
 
 func TestApp_PrCmd_IsRegistered(t *testing.T) {
-	app := cli.NewApp(&stubGit{}, &stubLLM{})
+	app := cli.NewApp(&stubLLM{})
 	cmd, _, err := app.RootCmd().Find([]string{"pr"})
 	if err != nil || cmd.Name() != "pr" {
 		t.Fatal("pr command not registered on App")
@@ -91,7 +91,10 @@ func TestApp_PrCmd_IsRegistered(t *testing.T) {
 
 func TestApp_Execute_Commit_PrintsLLMResponse(t *testing.T) {
 	llm := &stubLLM{response: "feat(auth): add token refresh"}
-	app := cli.NewApp(&stubGit{diff: "some diff"}, llm)
+	app := cli.NewApp(llm)
+	cli.InjectCommitService(app, &spyCommitService{
+		response: "feat(auth): add token refresh",
+	})
 
 	var buf bytes.Buffer
 	app.RootCmd().SetOut(&buf)
@@ -106,10 +109,10 @@ func TestApp_Execute_Commit_PrintsLLMResponse(t *testing.T) {
 }
 
 func TestApp_Execute_Commit_GitError_ReturnsError(t *testing.T) {
-	app := cli.NewApp(
-		&stubGit{err: errors.New("not a git repo")},
-		&stubLLM{},
-	)
+	app := cli.NewApp(&stubLLM{})
+	cli.InjectCommitService(app, &spyCommitService{
+		err: errors.New("not a git repo"),
+	})
 	app.RootCmd().SetArgs([]string{"commit"})
 
 	if err := app.Execute(); err == nil {
@@ -119,9 +122,11 @@ func TestApp_Execute_Commit_GitError_ReturnsError(t *testing.T) {
 
 func TestApp_Execute_Commit_LLMError_ReturnsError(t *testing.T) {
 	app := cli.NewApp(
-		&stubGit{diff: "some diff"},
 		&stubLLM{err: errors.New("LLM unavailable")},
 	)
+	cli.InjectCommitService(app, &spyCommitService{
+		err: errors.New("LLM unavailable"),
+	})
 	app.RootCmd().SetArgs([]string{"commit"})
 
 	if err := app.Execute(); err == nil {
@@ -137,8 +142,10 @@ func TestApp_TwoInstances_DoNotShareState(t *testing.T) {
 	llm1 := &stubLLM{response: "feat: one"}
 	llm2 := &stubLLM{response: "fix: two"}
 
-	app1 := cli.NewApp(&stubGit{diff: "d1"}, llm1)
-	app2 := cli.NewApp(&stubGit{diff: "d2"}, llm2)
+	app1 := cli.NewApp(llm1)
+	app2 := cli.NewApp(llm2)
+	cli.InjectCommitService(app1, &spyCommitService{response: "feat: one"})
+	cli.InjectCommitService(app2, &spyCommitService{response: "fix: two"})
 
 	var buf1, buf2 bytes.Buffer
 	app1.RootCmd().SetOut(&buf1)
@@ -168,7 +175,7 @@ func TestApp_TwoInstances_DoNotShareState(t *testing.T) {
 
 func TestApp_Execute_Commit_PassesTypeFlag(t *testing.T) {
 	llm := &stubLLM{response: "fix: patch"}
-	app := cli.NewApp(&stubGit{diff: "d"}, llm)
+	app := cli.NewApp(llm)
 	app.RootCmd().SetArgs([]string{"commit", "--type", "fix"})
 
 	if err := app.Execute(); err != nil {
@@ -177,7 +184,7 @@ func TestApp_Execute_Commit_PassesTypeFlag(t *testing.T) {
 }
 
 func TestApp_Execute_Commit_InvalidType_ReturnsError(t *testing.T) {
-	app := cli.NewApp(&stubGit{diff: "d"}, &stubLLM{})
+	app := cli.NewApp(&stubLLM{})
 	app.RootCmd().SetArgs([]string{"commit", "--type", "invalid"})
 
 	err := app.Execute()
@@ -190,7 +197,7 @@ func TestApp_Execute_Commit_InvalidType_ReturnsError(t *testing.T) {
 }
 
 func TestApp_Execute_Commit_ShortAndDetailed_MutuallyExclusive(t *testing.T) {
-	app := cli.NewApp(&stubGit{}, &stubLLM{})
+	app := cli.NewApp(&stubLLM{})
 	app.RootCmd().SetArgs([]string{"commit", "--short", "--detailed"})
 
 	if err := app.Execute(); err == nil {
@@ -206,7 +213,7 @@ func TestApp_Execute_Commit_DetailedFlag_PropagatesMode(t *testing.T) {
 	var capturedOpts service.CommitOptions
 	spy := &spyCommitService{}
 
-	app := cli.NewApp(&stubGit{diff: "d"}, &stubLLM{})
+	app := cli.NewApp(&stubLLM{})
 	app.RootCmd().SetArgs([]string{"commit", "--detailed"})
 
 	// Replace the service after construction so we can capture options.
@@ -224,7 +231,7 @@ func TestApp_Execute_Commit_DetailedFlag_PropagatesMode(t *testing.T) {
 
 func TestApp_Execute_Commit_TypeFlag_PropagatesType(t *testing.T) {
 	spy := &spyCommitService{}
-	app := cli.NewApp(&stubGit{diff: "d"}, &stubLLM{})
+	app := cli.NewApp(&stubLLM{})
 	app.RootCmd().SetArgs([]string{"commit", "--type", "refactor"})
 	cli.InjectCommitService(app, spy)
 

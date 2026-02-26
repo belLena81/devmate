@@ -85,7 +85,9 @@ func (s *Service) DraftPrDescription(o PrOptions) (string, error) {
 		return "", err
 	}
 
-	s.Log.Debug("got diff", "bytes", len(commits)) // size not content
+	s.Log.Debug("calling LogBetween", "base", o.DestinationBranch, "head", o.SourceBranch)
+	msgs, err := s.Git.LogBetween(o.DestinationBranch, o.SourceBranch)
+	s.Log.Debug("LogBetween result", "msgs", msgs, "err", err)
 	prompt := BuildPrPrompt(commits, o)
 	result, err := s.LLM.Generate(prompt)
 	if err != nil {
