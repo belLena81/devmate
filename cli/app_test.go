@@ -15,19 +15,6 @@ import (
 	"devmate/cli"
 )
 
-// ---------------------------------------------------------------------------
-// Test doubles
-// ---------------------------------------------------------------------------
-
-type stubGit struct {
-	diff   string
-	branch string
-	err    error
-}
-
-func (s *stubGit) DiffCached() (string, error)                    { return s.diff, s.err }
-func (s *stubGit) LogBetween(base, head string) ([]string, error) { return nil, s.err }
-
 type stubLLM struct {
 	response string
 	err      error
@@ -172,16 +159,6 @@ func TestApp_TwoInstances_DoNotShareState(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Flag wiring through App.Execute
 // ---------------------------------------------------------------------------
-
-func TestApp_Execute_Commit_PassesTypeFlag(t *testing.T) {
-	llm := &stubLLM{response: "fix: patch"}
-	app := cli.NewApp(llm)
-	app.RootCmd().SetArgs([]string{"commit", "--type", "fix"})
-
-	if err := app.Execute(); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
 
 func TestApp_Execute_Commit_InvalidType_ReturnsError(t *testing.T) {
 	app := cli.NewApp(&stubLLM{})

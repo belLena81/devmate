@@ -23,16 +23,15 @@ type CommitService interface {
 }
 
 func newCommitCmd(a *App) *cobra.Command {
+	var rawCmdType string
+	var explain, rawShort, rawDetailed bool
+
 	validateAndRunCommit := func(cmd *cobra.Command, args []string) error {
 		//validate type and prepare options
 		var err error
 		commitOpts, err = NewCommit(rawCmdType, rawShort, rawDetailed, explain)
 		if err != nil {
 			return err
-		}
-		if a.commitService == nil {
-			// real construction — wired once you have infra ready
-			return domain.ServiceNotInitialized
 		}
 		msg, err := a.commitService.DraftMessage(commitOpts)
 		if err != nil {
@@ -82,7 +81,7 @@ Note:
 		&explain,
 		"explain",
 		false,
-		"explain why this commit message was generated",
+		"explaio why this commit message was generated",
 	)
 
 	commitCmd.Flags().BoolVar(

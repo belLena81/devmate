@@ -27,6 +27,9 @@ type PrService interface {
 }
 
 func newPrCmd(a *App) *cobra.Command {
+	var rawCmdType string
+	var explain, rawShort, rawDetailed bool
+
 	validateAndRunPr := func(cmd *cobra.Command, args []string) error {
 		prOpts, err := NewPr(args[0], args[1], rawCmdType, rawShort, rawDetailed, explain)
 		if err != nil {
@@ -37,7 +40,6 @@ func newPrCmd(a *App) *cobra.Command {
 			return err
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), pr)
-		//call service to run a command
 		return nil
 	}
 	prCmd := &cobra.Command{

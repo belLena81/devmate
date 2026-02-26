@@ -77,14 +77,14 @@ func (s *Service) DraftPrDescription(o PrOptions) (string, error) {
 	cmdType, _ := o.Type.String()
 	mode := o.Mode.String()
 	s.Log.Debug("drafting pr description: branch names", "source", o.SourceBranch, "destination", o.DestinationBranch, "type", cmdType, "mode", mode)
-	s.Log.Debug("calling LogBetween", "base", o.DestinationBranch, "head", o.SourceBranch)
 	commits, err := s.Git.LogBetween(o.DestinationBranch, o.SourceBranch)
 	if err != nil {
 		s.Log.Error("failed to get commits", "error", err)
 		return "", err
 	}
 
-	s.Log.Debug("LogBetween result", "msgs", commits, "err", err)
+	s.Log.Debug("got commits", "count", len(commits))
+
 	prompt := BuildPrPrompt(commits, o)
 	result, err := s.LLM.Generate(prompt)
 	if err != nil {

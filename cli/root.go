@@ -4,13 +4,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	rawCmdType  string
-	explain     bool
-	rawShort    bool
-	rawDetailed bool
-)
-
 func buildRootCmd(app *App) *cobra.Command {
 	root := &cobra.Command{
 		Use:   "devmate",

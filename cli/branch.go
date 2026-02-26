@@ -24,6 +24,9 @@ type BranchService interface {
 }
 
 func newBranchCmd(a *App) *cobra.Command {
+	var rawCmdType string
+	var explain, rawShort, rawDetailed bool
+
 	validateAndRunBranch := func(cmd *cobra.Command, args []string) error {
 		branchOpts, err := NewBranch(args[0], rawCmdType, rawShort, rawDetailed, explain)
 		if err != nil {
@@ -70,7 +73,6 @@ Note:
 		Args: cobra.ExactArgs(1),
 		RunE: validateAndRunBranch,
 	}
-	//a.rootCmd.AddCommand(branchCmd)
 
 	branchCmd.Flags().StringVarP(
 		&rawCmdType,
