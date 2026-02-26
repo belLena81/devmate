@@ -19,3 +19,25 @@ func (f *fakeCommitService) DraftMessage(o service.CommitOptions) (string, error
 	f.options = o
 	return f.response, f.err
 }
+
+type fakeBranchService struct {
+	response string
+	err      error
+	options  service.BranchOptions
+}
+
+func (f *fakeBranchService) DraftBranchName(o service.BranchOptions) (string, error) {
+	f.options = o
+	return f.response, f.err
+}
+
+type fakePrService struct {
+	response string
+	err      error
+	options  service.PrOptions
+}
+
+func (f *fakePrService) DraftPrDescription(o service.PrOptions) (string, error) {
+	f.options = o
+	return f.response, f.err
+}

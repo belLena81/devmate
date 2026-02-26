@@ -8,8 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var PrOpts service.PrOptions
-
 func NewPr(source, target string, cmdType string, short, detailed, explain bool) (service.PrOptions, error) {
 	ct, err := parseCmdType(cmdType)
 	if err != nil {
@@ -24,14 +22,21 @@ func NewPr(source, target string, cmdType string, short, detailed, explain bool)
 	return service.PrOptions{source, target, domain.Options{ct, parseCmdMode(detailed), explain}}, nil
 }
 
+type PrService interface {
+	DraftPrDescription(opt service.PrOptions) (string, error)
+}
+
 func newPrCmd(a *App) *cobra.Command {
 	validateAndRunPr := func(cmd *cobra.Command, args []string) error {
-		var err error
-		PrOpts, err = NewPr(args[0], args[1], rawCmdType, rawShort, rawDetailed, explain)
+		prOpts, err := NewPr(args[0], args[1], rawCmdType, rawShort, rawDetailed, explain)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), PrOpts)
+		pr, err := a.prService.DraftPrDescription(prOpts)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), pr)
 		//call service to run a command
 		return nil
 	}
@@ -68,7 +73,6 @@ Note:
 		Args: cobra.ExactArgs(2),
 		RunE: validateAndRunPr,
 	}
-	//a.rootCmd.AddCommand(prCmd)
 
 	prCmd.Flags().StringVarP(
 		&rawCmdType,

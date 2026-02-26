@@ -35,7 +35,9 @@ type PrOptions struct {
 }
 
 func (s *Service) DraftMessage(o CommitOptions) (string, error) {
-	s.Log.Debug("drafting commit message", "type", o.Type, "mode", o.Mode)
+	cmdType, _ := o.Type.String()
+	mode := o.Mode.String()
+	s.Log.Debug("drafting commit message", "type", cmdType, "mode", mode)
 
 	diff, err := s.Git.DiffCached()
 	if err != nil {
@@ -55,6 +57,53 @@ func (s *Service) DraftMessage(o CommitOptions) (string, error) {
 	return result, nil
 }
 
+func (s *Service) DraftBranchName(o BranchOptions) (string, error) {
+	cmdType, _ := o.Type.String()
+	mode := o.Mode.String()
+	s.Log.Debug("drafting branch name", "task", o.Task, "type", cmdType, "mode", mode)
+
+	prompt := BuildBranchPrompt(o)
+	result, err := s.LLM.Generate(prompt)
+	if err != nil {
+		s.Log.Error("LLM generation failed", "error", err)
+		return "", err
+	}
+
+	s.Log.Debug("message drafted successfully")
+	return result, nil
+}
+
+func (s *Service) DraftPrDescription(o PrOptions) (string, error) {
+	cmdType, _ := o.Type.String()
+	mode := o.Mode.String()
+	s.Log.Debug("drafting pr description: branch names", "source", o.SourceBranch, "destination", o.DestinationBranch, "type", cmdType, "mode", mode)
+
+	diff, err := s.Git.Compare(o.SourceBranch, o.DestinationBranch)
+	if err != nil {
+		s.Log.Error("failed to get diff", "error", err)
+		return "", err
+	}
+
+	s.Log.Debug("got diff", "bytes", len(diff)) // size not content
+	prompt := BuildPrPrompt(diff, o)
+	result, err := s.LLM.Generate(prompt)
+	if err != nil {
+		s.Log.Error("LLM generation failed", "error", err)
+		return "", err
+	}
+
+	s.Log.Debug("message drafted successfully")
+	return result, nil
+}
+
 func BuildCommitPrompt(diff string, o CommitOptions) string {
+	return diff
+}
+
+func BuildBranchPrompt(o BranchOptions) string {
+	return o.Task
+}
+
+func BuildPrPrompt(diff string, o PrOptions) string {
 	return diff
 }

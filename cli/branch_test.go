@@ -8,7 +8,7 @@ import (
 
 // newBranchApp returns a minimal App suitable for branch command tests.
 func newBranchApp() *App {
-	app := &App{commitService: &fakeCommitService{}}
+	app := &App{commitService: &fakeCommitService{}, branchService: &fakeBranchService{}, prService: &fakePrService{}}
 	app.rootCmd = buildRootCmd(app)
 	return app
 }

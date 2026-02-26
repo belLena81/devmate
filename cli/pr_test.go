@@ -8,7 +8,7 @@ import (
 
 // newPrApp returns a minimal App suitable for pr command tests.
 func newPrApp() *App {
-	app := &App{commitService: &fakeCommitService{}}
+	app := &App{commitService: &fakeCommitService{}, branchService: &fakeBranchService{}, prService: &fakePrService{}}
 	app.rootCmd = buildRootCmd(app)
 	return app
 }

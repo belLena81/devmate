@@ -13,8 +13,8 @@ import (
 type App struct {
 	rootCmd       *cobra.Command
 	commitService CommitService
-	// branchService BranchService  (add as you implement)
-	// prService     PrService
+	branchService BranchService
+	prService     PrService
 }
 
 func NewApp(git domain.GitClient, llm domain.LLM) *App {
@@ -24,6 +24,8 @@ func NewApp(git domain.GitClient, llm domain.LLM) *App {
 	svc := &service.Service{Git: git, LLM: llm, Log: log}
 	app := &App{
 		commitService: svc,
+		branchService: svc,
+		prService:     svc,
 	}
 	app.rootCmd = buildRootCmd(app)
 	return app

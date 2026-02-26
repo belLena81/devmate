@@ -8,8 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var BranchOpts service.BranchOptions
-
 func NewBranch(task string, cmdType string, short, detailed, explain bool) (service.BranchOptions, error) {
 	ct, err := parseCmdType(cmdType)
 	if err != nil {
@@ -21,14 +19,25 @@ func NewBranch(task string, cmdType string, short, detailed, explain bool) (serv
 	return service.BranchOptions{task, domain.Options{ct, parseCmdMode(detailed), explain}}, nil
 }
 
+type BranchService interface {
+	DraftBranchName(opt service.BranchOptions) (string, error)
+}
+
 func newBranchCmd(a *App) *cobra.Command {
 	validateAndRunBranch := func(cmd *cobra.Command, args []string) error {
-		var err error
-		BranchOpts, err = NewBranch(args[0], rawCmdType, rawShort, rawDetailed, explain)
+		branchOpts, err := NewBranch(args[0], rawCmdType, rawShort, rawDetailed, explain)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), BranchOpts)
+		if a.branchService == nil {
+			// real construction — wired once you have infra ready
+			return domain.ServiceNotInitialized
+		}
+		msg, err := a.branchService.DraftBranchName(branchOpts)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), msg)
 		//call service to run a command
 		return nil
 	}
