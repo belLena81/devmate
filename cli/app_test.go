@@ -6,24 +6,70 @@ package cli_test
 
 import (
 	"bytes"
+	"devmate/cli"
 	"devmate/internal/domain"
 	"devmate/internal/service"
 	"errors"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
-
-	"devmate/cli"
 )
+
+// ---------------------------------------------------------------------------
+// Test doubles
+// ---------------------------------------------------------------------------
 
 type stubLLM struct {
 	response string
 	err      error
-	received string
 }
 
-func (s *stubLLM) Generate(prompt string) (string, error) {
-	s.received = prompt
+func (s *stubLLM) Generate(string) (string, error) { return s.response, s.err }
+
+// spyCommitService captures the options passed to DraftMessage.
+type spyCommitService struct {
+	receivedOpts service.CommitOptions
+	response     string
+	err          error
+}
+
+func (s *spyCommitService) DraftMessage(o service.CommitOptions) (string, error) {
+	s.receivedOpts = o
 	return s.response, s.err
+}
+
+// spyBranchService captures the options passed to DraftBranchName.
+type spyBranchService struct {
+	receivedOpts service.BranchOptions
+	response     string
+	err          error
+}
+
+func (s *spyBranchService) DraftBranchName(o service.BranchOptions) (string, error) {
+	s.receivedOpts = o
+	return s.response, s.err
+}
+
+// spyPrService captures the options passed to DraftPrDescription.
+type spyPrService struct {
+	receivedOpts service.PrOptions
+	response     string
+	err          error
+}
+
+func (s *spyPrService) DraftPrDescription(o service.PrOptions) (string, error) {
+	s.receivedOpts = o
+	return s.response, s.err
+}
+
+func newApp(t *testing.T) *cli.App {
+	t.Helper()
+	return cli.NewApp(&stubLLM{})
+}
+
+func noopLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 // ---------------------------------------------------------------------------
@@ -31,16 +77,25 @@ func (s *stubLLM) Generate(prompt string) (string, error) {
 // ---------------------------------------------------------------------------
 
 func TestNewApp_ReturnsNonNilApp(t *testing.T) {
-	app := cli.NewApp(&stubLLM{})
-	if app == nil {
+	if cli.NewApp(&stubLLM{}) == nil {
 		t.Fatal("NewApp returned nil")
 	}
 }
 
 func TestApp_RootCmd_IsNamed_devmate(t *testing.T) {
-	app := cli.NewApp(&stubLLM{})
-	if app.RootCmd().Name() != "devmate" {
-		t.Errorf("expected root command name %q, got %q", "devmate", app.RootCmd().Name())
+	if newApp(t).RootCmd().Name() != "devmate" {
+		t.Errorf("expected root command name %q", "devmate")
+	}
+}
+
+func TestNewAppWithService_ReturnsNonNilApp(t *testing.T) {
+	svc := &service.Service{
+		LLM:   &stubLLM{},
+		Cache: service.NoopCache{},
+		Log:   noopLogger(),
+	}
+	if cli.NewAppWithService(svc) == nil {
+		t.Fatal("NewAppWithService returned nil")
 	}
 }
 
@@ -49,39 +104,33 @@ func TestApp_RootCmd_IsNamed_devmate(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestApp_CommitCmd_IsRegistered(t *testing.T) {
-	app := cli.NewApp(&stubLLM{})
-	cmd, _, err := app.RootCmd().Find([]string{"commit"})
+	cmd, _, err := newApp(t).RootCmd().Find([]string{"commit"})
 	if err != nil || cmd.Name() != "commit" {
-		t.Fatal("commit command not registered on App")
+		t.Fatal("commit command not registered")
 	}
 }
 
 func TestApp_BranchCmd_IsRegistered(t *testing.T) {
-	app := cli.NewApp(&stubLLM{})
-	cmd, _, err := app.RootCmd().Find([]string{"branch"})
+	cmd, _, err := newApp(t).RootCmd().Find([]string{"branch"})
 	if err != nil || cmd.Name() != "branch" {
-		t.Fatal("branch command not registered on App")
+		t.Fatal("branch command not registered")
 	}
 }
 
 func TestApp_PrCmd_IsRegistered(t *testing.T) {
-	app := cli.NewApp(&stubLLM{})
-	cmd, _, err := app.RootCmd().Find([]string{"pr"})
+	cmd, _, err := newApp(t).RootCmd().Find([]string{"pr"})
 	if err != nil || cmd.Name() != "pr" {
-		t.Fatal("pr command not registered on App")
+		t.Fatal("pr command not registered")
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Execute wires through to the service
+// commit command
 // ---------------------------------------------------------------------------
 
 func TestApp_Execute_Commit_PrintsLLMResponse(t *testing.T) {
-	llm := &stubLLM{response: "feat(auth): add token refresh"}
-	app := cli.NewApp(llm)
-	cli.InjectCommitService(app, &spyCommitService{
-		response: "feat(auth): add token refresh",
-	})
+	app := newApp(t)
+	cli.InjectCommitService(app, &spyCommitService{response: "feat(auth): add token refresh"})
 
 	var buf bytes.Buffer
 	app.RootCmd().SetOut(&buf)
@@ -96,72 +145,25 @@ func TestApp_Execute_Commit_PrintsLLMResponse(t *testing.T) {
 }
 
 func TestApp_Execute_Commit_GitError_ReturnsError(t *testing.T) {
-	app := cli.NewApp(&stubLLM{})
-	cli.InjectCommitService(app, &spyCommitService{
-		err: errors.New("not a git repo"),
-	})
+	app := newApp(t)
+	cli.InjectCommitService(app, &spyCommitService{err: errors.New("not a git repo")})
 	app.RootCmd().SetArgs([]string{"commit"})
-
 	if err := app.Execute(); err == nil {
 		t.Fatal("expected error when git fails")
 	}
 }
 
 func TestApp_Execute_Commit_LLMError_ReturnsError(t *testing.T) {
-	app := cli.NewApp(
-		&stubLLM{err: errors.New("LLM unavailable")},
-	)
-	cli.InjectCommitService(app, &spyCommitService{
-		err: errors.New("LLM unavailable"),
-	})
+	app := newApp(t)
+	cli.InjectCommitService(app, &spyCommitService{err: errors.New("LLM unavailable")})
 	app.RootCmd().SetArgs([]string{"commit"})
-
 	if err := app.Execute(); err == nil {
 		t.Fatal("expected error when LLM fails")
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Each App instance is fully independent — no shared global state
-// ---------------------------------------------------------------------------
-
-func TestApp_TwoInstances_DoNotShareState(t *testing.T) {
-	llm1 := &stubLLM{response: "feat: one"}
-	llm2 := &stubLLM{response: "fix: two"}
-
-	app1 := cli.NewApp(llm1)
-	app2 := cli.NewApp(llm2)
-	cli.InjectCommitService(app1, &spyCommitService{response: "feat: one"})
-	cli.InjectCommitService(app2, &spyCommitService{response: "fix: two"})
-
-	var buf1, buf2 bytes.Buffer
-	app1.RootCmd().SetOut(&buf1)
-	app2.RootCmd().SetOut(&buf2)
-
-	app1.RootCmd().SetArgs([]string{"commit"})
-	app2.RootCmd().SetArgs([]string{"commit"})
-
-	if err := app1.Execute(); err != nil {
-		t.Fatalf("app1 error: %v", err)
-	}
-	if err := app2.Execute(); err != nil {
-		t.Fatalf("app2 error: %v", err)
-	}
-
-	if !strings.Contains(buf1.String(), "feat: one") {
-		t.Errorf("app1: expected %q, got %q", "feat: one", buf1.String())
-	}
-	if !strings.Contains(buf2.String(), "fix: two") {
-		t.Errorf("app2: expected %q, got %q", "fix: two", buf2.String())
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Flag wiring through App.Execute
-// ---------------------------------------------------------------------------
-
 func TestApp_Execute_Commit_InvalidType_ReturnsError(t *testing.T) {
-	app := cli.NewApp(&stubLLM{})
+	app := newApp(t)
 	app.RootCmd().SetArgs([]string{"commit", "--type", "invalid"})
 
 	err := app.Execute()
@@ -174,41 +176,30 @@ func TestApp_Execute_Commit_InvalidType_ReturnsError(t *testing.T) {
 }
 
 func TestApp_Execute_Commit_ShortAndDetailed_MutuallyExclusive(t *testing.T) {
-	app := cli.NewApp(&stubLLM{})
+	app := newApp(t)
 	app.RootCmd().SetArgs([]string{"commit", "--short", "--detailed"})
-
 	if err := app.Execute(); err == nil {
 		t.Fatal("expected error for mutually exclusive flags")
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Commit service options propagation
-// ---------------------------------------------------------------------------
-
 func TestApp_Execute_Commit_DetailedFlag_PropagatesMode(t *testing.T) {
-	var capturedOpts service.CommitOptions
 	spy := &spyCommitService{}
-
-	app := cli.NewApp(&stubLLM{})
+	app := newApp(t)
 	app.RootCmd().SetArgs([]string{"commit", "--detailed"})
-
-	// Replace the service after construction so we can capture options.
-	// This is done via the exported InjectCommitService test helper.
 	cli.InjectCommitService(app, spy)
 
 	if err := app.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	capturedOpts = spy.receivedOpts
-	if capturedOpts.Mode != domain.Detailed {
-		t.Errorf("expected Detailed mode, got %v", capturedOpts.Mode)
+	if spy.receivedOpts.Mode != domain.Detailed {
+		t.Errorf("expected Detailed mode, got %v", spy.receivedOpts.Mode)
 	}
 }
 
 func TestApp_Execute_Commit_TypeFlag_PropagatesType(t *testing.T) {
 	spy := &spyCommitService{}
-	app := cli.NewApp(&stubLLM{})
+	app := newApp(t)
 	app.RootCmd().SetArgs([]string{"commit", "--type", "refactor"})
 	cli.InjectCommitService(app, spy)
 
@@ -220,14 +211,296 @@ func TestApp_Execute_Commit_TypeFlag_PropagatesType(t *testing.T) {
 	}
 }
 
-// spyCommitService captures the options passed to DraftMessage.
-type spyCommitService struct {
-	receivedOpts service.CommitOptions
-	response     string
-	err          error
+func TestApp_Execute_Commit_ExplainFlag_Propagates(t *testing.T) {
+	spy := &spyCommitService{}
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"commit", "--explain"})
+	cli.InjectCommitService(app, spy)
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !spy.receivedOpts.Explain {
+		t.Error("expected Explain=true, got false")
+	}
 }
 
-func (s *spyCommitService) DraftMessage(o service.CommitOptions) (string, error) {
-	s.receivedOpts = o
-	return s.response, s.err
+// ---------------------------------------------------------------------------
+// branch command
+// ---------------------------------------------------------------------------
+
+func TestApp_Execute_Branch_PrintsLLMResponse(t *testing.T) {
+	app := newApp(t)
+	cli.InjectBranchService(app, &spyBranchService{response: "feat/add-auth"})
+
+	var buf bytes.Buffer
+	app.RootCmd().SetOut(&buf)
+	app.RootCmd().SetArgs([]string{"branch", "add user authentication"})
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "feat/add-auth") {
+		t.Errorf("expected branch name in stdout, got %q", buf.String())
+	}
+}
+
+func TestApp_Execute_Branch_MissingArg_ReturnsError(t *testing.T) {
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"branch"})
+	if err := app.Execute(); err == nil {
+		t.Fatal("expected error for missing task argument")
+	}
+}
+
+func TestApp_Execute_Branch_LLMError_ReturnsError(t *testing.T) {
+	app := newApp(t)
+	cli.InjectBranchService(app, &spyBranchService{err: errors.New("llm failed")})
+	app.RootCmd().SetArgs([]string{"branch", "some task"})
+	if err := app.Execute(); err == nil {
+		t.Fatal("expected error when LLM fails")
+	}
+}
+
+func TestApp_Execute_Branch_TypeFlag_PropagatesType(t *testing.T) {
+	spy := &spyBranchService{}
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"branch", "--type", "fix", "fix login crash"})
+	cli.InjectBranchService(app, spy)
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spy.receivedOpts.Type != domain.Fix {
+		t.Errorf("expected Fix type, got %v", spy.receivedOpts.Type)
+	}
+}
+
+func TestApp_Execute_Branch_DetailedFlag_PropagatesMode(t *testing.T) {
+	spy := &spyBranchService{}
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"branch", "--detailed", "add auth"})
+	cli.InjectBranchService(app, spy)
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spy.receivedOpts.Mode != domain.Detailed {
+		t.Errorf("expected Detailed mode, got %v", spy.receivedOpts.Mode)
+	}
+}
+
+func TestApp_Execute_Branch_ExplainFlag_Propagates(t *testing.T) {
+	spy := &spyBranchService{}
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"branch", "--explain", "add auth"})
+	cli.InjectBranchService(app, spy)
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !spy.receivedOpts.Explain {
+		t.Error("expected Explain=true, got false")
+	}
+}
+
+func TestApp_Execute_Branch_ShortAndDetailed_MutuallyExclusive(t *testing.T) {
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"branch", "--short", "--detailed", "add auth"})
+	if err := app.Execute(); err == nil {
+		t.Fatal("expected error for mutually exclusive flags")
+	}
+}
+
+func TestApp_Execute_Branch_InvalidType_ReturnsError(t *testing.T) {
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"branch", "--type", "invalid", "add auth"})
+
+	err := app.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid type")
+	}
+	if !errors.Is(err, domain.ErrInvalidCmdType) {
+		t.Errorf("expected ErrInvalidCmdType, got %v", err)
+	}
+}
+
+func TestApp_Execute_Branch_PassesTaskToService(t *testing.T) {
+	spy := &spyBranchService{}
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"branch", "fix login bug"})
+	cli.InjectBranchService(app, spy)
+
+	app.Execute()
+	if spy.receivedOpts.Task != "fix login bug" {
+		t.Errorf("expected task %q, got %q", "fix login bug", spy.receivedOpts.Task)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// pr command
+// ---------------------------------------------------------------------------
+
+func TestApp_Execute_Pr_PrintsLLMResponse(t *testing.T) {
+	app := newApp(t)
+	cli.InjectPrService(app, &spyPrService{response: "feat: add login PR"})
+
+	var buf bytes.Buffer
+	app.RootCmd().SetOut(&buf)
+	app.RootCmd().SetArgs([]string{"pr", "feature/login", "main"})
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "feat: add login PR") {
+		t.Errorf("expected PR description in stdout, got %q", buf.String())
+	}
+}
+
+func TestApp_Execute_Pr_MissingBothArgs_ReturnsError(t *testing.T) {
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"pr"})
+	if err := app.Execute(); err == nil {
+		t.Fatal("expected error for missing branch arguments")
+	}
+}
+
+func TestApp_Execute_Pr_MissingSecondArg_ReturnsError(t *testing.T) {
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"pr", "feature/login"})
+	if err := app.Execute(); err == nil {
+		t.Fatal("expected error for missing second branch argument")
+	}
+}
+
+func TestApp_Execute_Pr_LLMError_ReturnsError(t *testing.T) {
+	app := newApp(t)
+	cli.InjectPrService(app, &spyPrService{err: errors.New("llm failed")})
+	app.RootCmd().SetArgs([]string{"pr", "feature/x", "main"})
+	if err := app.Execute(); err == nil {
+		t.Fatal("expected error when LLM fails")
+	}
+}
+
+func TestApp_Execute_Pr_ErrEmptyPR_ReturnsError(t *testing.T) {
+	app := newApp(t)
+	cli.InjectPrService(app, &spyPrService{err: domain.ErrEmptyPR})
+	app.RootCmd().SetArgs([]string{"pr", "feature/x", "main"})
+
+	err := app.Execute()
+	if err == nil {
+		t.Fatal("expected ErrEmptyPR to surface as an error")
+	}
+	if !errors.Is(err, domain.ErrEmptyPR) {
+		t.Errorf("expected ErrEmptyPR, got %v", err)
+	}
+}
+
+func TestApp_Execute_Pr_PassesSourceAndDestination(t *testing.T) {
+	// args[0] = source (feature branch), args[1] = destination (base branch)
+	spy := &spyPrService{}
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"pr", "feature/add-auth", "main"})
+	cli.InjectPrService(app, spy)
+
+	app.Execute()
+	if spy.receivedOpts.SourceBranch != "feature/add-auth" {
+		t.Errorf("expected source %q, got %q", "feature/add-auth", spy.receivedOpts.SourceBranch)
+	}
+	if spy.receivedOpts.DestinationBranch != "main" {
+		t.Errorf("expected destination %q, got %q", "main", spy.receivedOpts.DestinationBranch)
+	}
+}
+
+func TestApp_Execute_Pr_TypeFlag_PropagatesType(t *testing.T) {
+	spy := &spyPrService{}
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"pr", "--type", "feat", "feature/x", "main"})
+	cli.InjectPrService(app, spy)
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spy.receivedOpts.Type != domain.Feat {
+		t.Errorf("expected Feat type, got %v", spy.receivedOpts.Type)
+	}
+}
+
+func TestApp_Execute_Pr_DetailedFlag_PropagatesMode(t *testing.T) {
+	spy := &spyPrService{}
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"pr", "--detailed", "feature/x", "main"})
+	cli.InjectPrService(app, spy)
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spy.receivedOpts.Mode != domain.Detailed {
+		t.Errorf("expected Detailed mode, got %v", spy.receivedOpts.Mode)
+	}
+}
+
+func TestApp_Execute_Pr_ExplainFlag_Propagates(t *testing.T) {
+	spy := &spyPrService{}
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"pr", "--explain", "feature/x", "main"})
+	cli.InjectPrService(app, spy)
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !spy.receivedOpts.Explain {
+		t.Error("expected Explain=true, got false")
+	}
+}
+
+func TestApp_Execute_Pr_ShortAndDetailed_MutuallyExclusive(t *testing.T) {
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"pr", "--short", "--detailed", "feature/x", "main"})
+	if err := app.Execute(); err == nil {
+		t.Fatal("expected error for mutually exclusive flags")
+	}
+}
+
+func TestApp_Execute_Pr_InvalidType_ReturnsError(t *testing.T) {
+	app := newApp(t)
+	app.RootCmd().SetArgs([]string{"pr", "--type", "invalid", "feature/x", "main"})
+
+	err := app.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid type")
+	}
+	if !errors.Is(err, domain.ErrInvalidCmdType) {
+		t.Errorf("expected ErrInvalidCmdType, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Two instances do not share state
+// ---------------------------------------------------------------------------
+
+func TestApp_TwoInstances_DoNotShareState(t *testing.T) {
+	app1 := newApp(t)
+	app2 := newApp(t)
+	cli.InjectCommitService(app1, &spyCommitService{response: "feat: one"})
+	cli.InjectCommitService(app2, &spyCommitService{response: "fix: two"})
+
+	var buf1, buf2 bytes.Buffer
+	app1.RootCmd().SetOut(&buf1)
+	app2.RootCmd().SetOut(&buf2)
+	app1.RootCmd().SetArgs([]string{"commit"})
+	app2.RootCmd().SetArgs([]string{"commit"})
+
+	if err := app1.Execute(); err != nil {
+		t.Fatalf("app1 error: %v", err)
+	}
+	if err := app2.Execute(); err != nil {
+		t.Fatalf("app2 error: %v", err)
+	}
+	if !strings.Contains(buf1.String(), "feat: one") {
+		t.Errorf("app1: expected %q, got %q", "feat: one", buf1.String())
+	}
+	if !strings.Contains(buf2.String(), "fix: two") {
+		t.Errorf("app2: expected %q, got %q", "fix: two", buf2.String())
+	}
 }

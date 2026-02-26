@@ -63,6 +63,7 @@ var MissingSourceBranch = fmt.Errorf("missing source branch")
 var MissingTargetBranch = fmt.Errorf("missing target branch")
 var BranchDoesNotExist = fmt.Errorf("branch does not exist")
 var ServiceNotInitialized = fmt.Errorf("service not initialized")
+var ErrEmptyPR = fmt.Errorf("no unique commits found between branches — nothing to describe")
 
 func (m CmdMode) String() string {
 	switch m {

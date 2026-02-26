@@ -17,19 +17,29 @@ type App struct {
 	prService     PrService
 }
 
+// NewApp constructs the CLI application wired to the given LLM.
+// The git runner is resolved from the working directory.
+// Caching is disabled — use NewAppWithService for full wiring including cache.
 func NewApp(llm domain.LLM) *App {
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
+	svc := service.New(nil, llm, service.NoopCache{}, "", buildLogger())
+	return newAppFromService(svc)
+}
+
+// NewAppWithService constructs the CLI application from a fully wired service.
+// This is the production path used by main.go (includes cache and model name).
+func NewAppWithService(svc *service.Service) *App {
+	return newAppFromService(svc)
+}
+
+func newAppFromService(svc *service.Service) *App {
+	log := buildLogger()
 
 	repoRoot, err := git.RepoRoot()
 	if err != nil {
 		log.Error("failed to find git repo root", "error", err)
 		os.Exit(1)
 	}
-
-	runner := git.New(repoRoot, log)
-	svc := service.New(runner, llm, log)
+	svc.Git = git.New(repoRoot, log)
 
 	app := &App{
 		commitService: svc,
@@ -50,4 +60,18 @@ func (a *App) RootCmd() *cobra.Command {
 
 func InjectCommitService(app *App, svc CommitService) {
 	app.commitService = svc
+}
+
+func buildLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}))
+}
+
+func InjectBranchService(app *App, svc BranchService) {
+	app.branchService = svc
+}
+
+func InjectPrService(app *App, svc PrService) {
+	app.prService = svc
 }

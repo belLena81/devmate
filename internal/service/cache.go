@@ -1,0 +1,127 @@
+package service
+
+import (
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Cache is a simple key-value store for LLM responses.
+// Keys are opaque strings (typically hex-encoded hashes).
+// Values are the raw LLM response text.
+type Cache interface {
+	// Get returns the cached value and true, or ("", false) on a miss.
+	Get(key string) (string, bool)
+	// Set stores a value. Only called on successful LLM responses — never on errors.
+	Set(key, value string) error
+	// Clear removes all cached entries.
+	Clear() error
+}
+
+// DiskCache stores each cache entry as a file in a directory.
+// The filename is the cache key. This makes the cache trivially inspectable
+// with standard tools and allows individual entries to be deleted manually.
+//
+// Location follows the XDG cache convention: ~/.cache/devmate/
+type DiskCache struct {
+	dir string
+}
+
+// NewDiskCache returns a DiskCache rooted at dir.
+// The directory is created lazily on the first Set call.
+func NewDiskCache(dir string) *DiskCache {
+	return &DiskCache{dir: dir}
+}
+
+func (c *DiskCache) Get(key string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(c.dir, key))
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
+}
+
+func (c *DiskCache) Set(key, value string) error {
+	if err := os.MkdirAll(c.dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(c.dir, key), []byte(value), 0o644)
+}
+
+func (c *DiskCache) Clear() error {
+	entries, err := os.ReadDir(c.dir)
+	if os.IsNotExist(err) {
+		return nil // nothing to clear
+	}
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := os.Remove(filepath.Join(c.dir, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// buildCacheKey computes a cache key from a template fingerprint plus a
+// variable number of input fields. It uses length-prefixed encoding so that
+// adjacent fields with different boundaries cannot produce the same hash —
+// e.g. ("feat", "fix") ≠ ("fe", "atfix").
+//
+// Key composition: SHA256(tmplHash || len(f0) || f0 || len(f1) || f1 || ...)
+//
+// This means:
+//   - Editing a template invalidates all entries for that command.
+//   - Switching models invalidates all entries.
+//   - Any change to git output or options invalidates the specific entry.
+func buildCacheKey(tmplHash [32]byte, fields ...string) string {
+	h := sha256.New()
+	h.Write(tmplHash[:])
+	for _, f := range fields {
+		// Write 8-byte little-endian length prefix, then the field content.
+		buf := make([]byte, 8)
+		binary.LittleEndian.PutUint64(buf, uint64(len(f)))
+		h.Write(buf)
+		io.WriteString(h, f)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// Template fingerprints — computed once at startup from the embedded template
+// strings. Changing any template file changes its hash, which changes every
+// cache key for that command, automatically invalidating stale entries.
+var (
+	commitTmplHash = sha256.Sum256([]byte(commitTmpl))
+	branchTmplHash = sha256.Sum256([]byte(branchTmpl))
+	prTmplHash     = sha256.Sum256([]byte(prTmpl))
+)
+
+// commitCacheKey builds the cache key for a DraftMessage call.
+// Inputs: model, raw diff, type override, mode, explain flag.
+func commitCacheKey(model, diff, typeStr, modeStr string, explain bool) string {
+	return buildCacheKey(commitTmplHash, model, diff, typeStr, modeStr, boolStr(explain))
+}
+
+// branchCacheKey builds the cache key for a DraftBranchName call.
+// Inputs: model, task description, type override, mode, explain flag.
+func branchCacheKey(model, task, typeStr, modeStr string, explain bool) string {
+	return buildCacheKey(branchTmplHash, model, task, typeStr, modeStr, boolStr(explain))
+}
+
+// prCacheKey builds the cache key for a DraftPrDescription call.
+// Inputs: model, commit messages (joined), type override, mode, explain flag.
+func prCacheKey(model string, commits []string, typeStr, modeStr string, explain bool) string {
+	return buildCacheKey(prTmplHash, model, strings.Join(commits, "\n"), typeStr, modeStr, boolStr(explain))
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}

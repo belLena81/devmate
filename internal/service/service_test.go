@@ -1,6 +1,7 @@
 package service
 
 import (
+	"devmate/internal/domain"
 	"errors"
 	"io"
 	"log/slog"
@@ -198,5 +199,30 @@ func TestCommitService_LLMError(t *testing.T) {
 	_, err := svc.DraftMessage(CommitOptions{})
 	if err == nil {
 		t.Fatal("expected error from LLM")
+	}
+}
+
+func TestPrService_NoCommits_ReturnsErrEmptyPR(t *testing.T) {
+	svc := Service{
+		Git: &fakeGit{commits: []string{}},
+		LLM: &fakeLLM{},
+		Log: noopLogger(),
+	}
+	_, err := svc.DraftPrDescription(PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
+	if !errors.Is(err, domain.ErrEmptyPR) {
+		t.Errorf("expected ErrEmptyPR, got %v", err)
+	}
+}
+
+func TestPrService_NoCommits_DoesNotCallLLM(t *testing.T) {
+	called := false
+	svc := Service{
+		Git: &fakeGit{commits: []string{}},
+		LLM: &fakeLLM{onGenerate: func(string) { called = true }},
+		Log: noopLogger(),
+	}
+	svc.DraftPrDescription(PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
+	if called {
+		t.Error("LLM must not be called when there are no commits")
 	}
 }
