@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -45,11 +46,29 @@ func (r *Runner) DiffCached() (string, error) {
 	return out, nil
 }
 
+// validRef returns an error if the string is not a plausible git ref name.
+// This guards against option injection (refs starting with "-").
+func validRef(ref string) error {
+	if strings.HasPrefix(ref, "-") {
+		return fmt.Errorf("invalid ref %q: ref names may not start with '-'", ref)
+	}
+	if ref == "" {
+		return fmt.Errorf("ref name must not be empty")
+	}
+	return nil
+}
+
 // LogBetween returns the commit subject lines that exist in head but not in
 // base, excluding merge commits. This is used to gather PR context for LLM
 // summarisation without noise from merge-back commits.
 // Returns an empty slice (and no error) when base and head are identical.
 func (r *Runner) LogBetween(base, head string) ([]string, error) {
+	if err := validRef(base); err != nil {
+		return nil, err
+	}
+	if err := validRef(head); err != nil {
+		return nil, err
+	}
 	r.log.Debug("running log between", "base", base, "head", head)
 	out, err := r.run(
 		"log",
@@ -78,6 +97,7 @@ func (r *Runner) LogBetween(base, head string) ([]string, error) {
 func (r *Runner) run(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.dir
+	cmd.Env = filteredEnv()
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -92,4 +112,17 @@ func (r *Runner) run(args ...string) (string, error) {
 	}
 
 	return stdout.String(), nil
+}
+
+// filteredEnv returns os.Environ() with all GIT_* variables removed.
+// This prevents the caller's git context from leaking into subprocesses.
+func filteredEnv() []string {
+	env := os.Environ()
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, "GIT_") {
+			filtered = append(filtered, e)
+		}
+	}
+	return filtered
 }

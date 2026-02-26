@@ -246,3 +246,72 @@ func TestLogBetween_ErrorOutsideGitRepo(t *testing.T) {
 		t.Fatal("expected error when run outside a git repo")
 	}
 }
+
+// --- validRef (option injection guard) --------------------------------------
+
+func TestLogBetween_ErrorOnRefStartingWithDash(t *testing.T) {
+	dir := newTestRepo(t)
+	stageFile(t, dir, "main.go", "package main\n")
+	commitAll(t, dir, "initial commit")
+
+	runner := git.New(dir, noopLogger())
+
+	_, err := runner.LogBetween("-p", "HEAD")
+	if err == nil {
+		t.Error("expected error when base ref starts with '-'")
+	}
+
+	_, err = runner.LogBetween("HEAD", "--all")
+	if err == nil {
+		t.Error("expected error when head ref starts with '-'")
+	}
+}
+
+func TestLogBetween_ErrorOnEmptyRef(t *testing.T) {
+	dir := newTestRepo(t)
+	stageFile(t, dir, "main.go", "package main\n")
+	commitAll(t, dir, "initial commit")
+
+	runner := git.New(dir, noopLogger())
+
+	_, err := runner.LogBetween("", "HEAD")
+	if err == nil {
+		t.Error("expected error for empty base ref")
+	}
+
+	_, err = runner.LogBetween("HEAD", "")
+	if err == nil {
+		t.Error("expected error for empty head ref")
+	}
+}
+
+// --- GIT_DIR isolation -------------------------------------------------------
+
+func TestRunner_IsolatesGitEnv(t *testing.T) {
+	// Create two separate repos.
+	repoA := newTestRepo(t)
+	stageFile(t, repoA, "main.go", "package main\n")
+	commitAll(t, repoA, "commit in repo A")
+	branchA := defaultBranch(t, repoA)
+
+	checkoutBranch(t, repoA, "feature/a")
+	stageFile(t, repoA, "a.go", "// a\n")
+	commitAll(t, repoA, "feature commit in A")
+
+	repoB := newTestRepo(t)
+	stageFile(t, repoB, "main.go", "package main\n")
+	commitAll(t, repoB, "commit in repo B")
+
+	// Leak repoB's GIT_DIR into the environment — simulating an IDE runner.
+	t.Setenv("GIT_DIR", repoB+"/.git")
+
+	// Runner for repoA must still see repoA's commits, not repoB's.
+	runner := git.New(repoA, noopLogger())
+	msgs, err := runner.LogBetween(branchA, "feature/a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0] != "feature commit in A" {
+		t.Errorf("expected repoA's commit, got: %v", msgs)
+	}
+}
