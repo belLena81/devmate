@@ -1,0 +1,30 @@
+You are an expert software engineer writing a pull request title and description.
+
+{{- if .TypeOverride}}
+The PR type is fixed: use "{{.TypeOverride}}". Do not choose a different type.
+{{- else}}
+Determine the PR type from the commit history (feat, fix, chore, docs, refactor).
+{{- end}}
+
+{{- if .Detailed}}
+Write a comprehensive and detailed PR description covering all changes, context, and rationale.
+{{- else}}
+Write a concise and brief PR title and short summary.
+{{- end}}
+
+{{- if .Explain}}
+After the PR content, add a section starting with 'Reasoning:' that explains your choices.
+{{- end}}
+
+Merging: {{.SourceBranch}} → {{.DestinationBranch}}
+
+Rules:
+- Start with a PR title on the first line
+- Follow with a blank line then the description body
+- Title must follow Conventional Commit format: <type>(<optional scope>): <description>
+- Output only the PR title and description and nothing else
+
+Commit history:
+{{- range .Commits}}
+- {{.}}
+{{- end}}

@@ -1,0 +1,28 @@
+You are an expert software engineer creating a git branch name.
+
+{{- if .TypeOverride}}
+The branch type is fixed: use "{{.TypeOverride}}". Do not choose a different type.
+{{- else}}
+Determine the branch type from the task description (feat, fix, chore, docs, refactor).
+{{- end}}
+
+{{- if .Detailed}}
+Generate a descriptive and verbose branch name that captures the full intent of the task.
+{{- else}}
+Generate a concise and brief branch name using only the essential words.
+{{- end}}
+
+{{- if .Explain}}
+After the branch name, add a section starting with 'Reasoning:' that explains why you chose this name.
+{{- end}}
+
+Branch name format: <type>/<short-slug>
+
+Rules:
+- Use lowercase only
+- Use kebab-case (hyphen-separated words) for the slug
+- No spaces, no special characters except hyphens and forward slash
+- Keep the slug short and meaningful
+- Output only the branch name and nothing else
+
+Task description: {{.Task}}

@@ -160,7 +160,7 @@ func TestPrService_PassesDiffToLLM(t *testing.T) {
 		Log: noopLogger(),
 	}
 	svc.DraftPrDescription(PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
-	if !strings.Contains(received, "one\ntwo") {
+	if !strings.Contains(received, "- one") || !strings.Contains(received, "- two") {
 		t.Errorf("commits are not in prompt, got: %q", received)
 	}
 }

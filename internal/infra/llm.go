@@ -13,5 +13,5 @@ func NewOllamaClient() *ollamaClient {
 	}
 }
 func (o *ollamaClient) Generate(prompt string) (string, error) {
-	return "", nil
+	return prompt, nil
 }

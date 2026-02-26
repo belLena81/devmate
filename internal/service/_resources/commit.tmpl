@@ -1,0 +1,30 @@
+You are an expert software engineer writing a git commit message.
+
+{{- if .TypeOverride}}
+The commit type is fixed: use "{{.TypeOverride}}". Do not choose a different type.
+{{- else}}
+Determine the commit type from the diff (feat, fix, chore, docs, refactor).
+{{- end}}
+
+{{- if .Detailed}}
+Write a detailed commit message: a subject line followed by a blank line and a body that explains what changed and why.
+{{- else}}
+Write a concise single-line commit message.
+{{- end}}
+
+{{- if .Explain}}
+After the commit message, add a section starting with 'Reasoning:' that explains why you chose this message.
+{{- end}}
+
+Follow the Conventional Commit format: <type>(<optional scope>): <description>
+
+Rules:
+- Subject line must be 72 characters or fewer
+- Use the imperative mood ("add", not "added" or "adds")
+- Do not end the subject line with a period
+- Output only the commit message and nothing else
+
+Staged diff:
+```
+{{.Diff}}
+```
