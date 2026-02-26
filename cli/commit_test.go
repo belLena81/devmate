@@ -13,13 +13,13 @@ import (
 // The fake service returns an empty response by default.
 func newCommitApp(svc CommitService) *App {
 	app := &App{commitService: svc}
-	app.root = buildRootCmd(app)
+	app.rootCmd = buildRootCmd(app)
 	return app
 }
 
 func TestCommitCmd_IsRegistered(t *testing.T) {
 	app := newCommitApp(&fakeCommitService{})
-	cmd, _, err := app.root.Find([]string{"commit"})
+	cmd, _, err := app.rootCmd.Find([]string{"commit"})
 	if err != nil || cmd.Name() != "commit" {
 		t.Fatal("commit command not registered")
 	}
@@ -27,7 +27,7 @@ func TestCommitCmd_IsRegistered(t *testing.T) {
 
 func TestCommitCmd_Flags(t *testing.T) {
 	app := newCommitApp(&fakeCommitService{})
-	cmd, _, _ := app.root.Find([]string{"commit"})
+	cmd, _, _ := app.rootCmd.Find([]string{"commit"})
 	f := cmd.Flags()
 
 	if f.Lookup("type") == nil {
@@ -46,7 +46,7 @@ func TestCommitCmd_Flags(t *testing.T) {
 
 func TestCommitCmd_FlagDefaults(t *testing.T) {
 	app := newCommitApp(&fakeCommitService{})
-	cmd, _, _ := app.root.Find([]string{"commit"})
+	cmd, _, _ := app.rootCmd.Find([]string{"commit"})
 	f := cmd.Flags()
 
 	if f.Lookup("type").DefValue != "" {
@@ -59,7 +59,7 @@ func TestCommitCmd_FlagDefaults(t *testing.T) {
 
 func TestCommitCmd_ShortAndDetailedMutuallyExclusive(t *testing.T) {
 	app := newCommitApp(&fakeCommitService{})
-	app.root.SetArgs([]string{"commit", "--short", "--detailed"})
+	app.rootCmd.SetArgs([]string{"commit", "--short", "--detailed"})
 
 	if err := app.Execute(); err == nil {
 		t.Error("expected error when --short and --detailed used together")
@@ -68,7 +68,7 @@ func TestCommitCmd_ShortAndDetailedMutuallyExclusive(t *testing.T) {
 
 func TestCommitCmd_RejectsPositionalArgs(t *testing.T) {
 	app := newCommitApp(&fakeCommitService{})
-	app.root.SetArgs([]string{"commit", "some-arg"})
+	app.rootCmd.SetArgs([]string{"commit", "some-arg"})
 
 	if err := app.Execute(); err == nil {
 		t.Error("expected error when positional args are passed")
@@ -77,7 +77,7 @@ func TestCommitCmd_RejectsPositionalArgs(t *testing.T) {
 
 func TestCommitCmd_RunsWithoutArgs(t *testing.T) {
 	app := newCommitApp(&fakeCommitService{})
-	app.root.SetArgs([]string{"commit"})
+	app.rootCmd.SetArgs([]string{"commit"})
 
 	if err := app.Execute(); err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -86,7 +86,7 @@ func TestCommitCmd_RunsWithoutArgs(t *testing.T) {
 
 func TestCommitCmd_InvalidType(t *testing.T) {
 	app := newCommitApp(&fakeCommitService{})
-	app.root.SetArgs([]string{"commit", "--type", "invalid"})
+	app.rootCmd.SetArgs([]string{"commit", "--type", "invalid"})
 
 	err := app.Execute()
 	if err == nil {
@@ -102,7 +102,7 @@ func TestCommitCmd_ValidTypes(t *testing.T) {
 	for _, tt := range types {
 		t.Run(tt, func(t *testing.T) {
 			app := newCommitApp(&fakeCommitService{})
-			app.root.SetArgs([]string{"commit", "--type", tt})
+			app.rootCmd.SetArgs([]string{"commit", "--type", tt})
 			if err := app.Execute(); err != nil {
 				t.Errorf("unexpected error for type %q: %v", tt, err)
 			}
@@ -125,8 +125,8 @@ func TestCommitCmd_PrintsGeneratedMessage(t *testing.T) {
 	app := newCommitApp(fake)
 
 	var buf bytes.Buffer
-	app.root.SetOut(&buf)
-	app.root.SetArgs([]string{"commit"})
+	app.rootCmd.SetOut(&buf)
+	app.rootCmd.SetArgs([]string{"commit"})
 
 	if err := app.Execute(); err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestCommitCmd_PrintsGeneratedMessage(t *testing.T) {
 func TestCommitCmd_ServiceError_ReturnsError(t *testing.T) {
 	fake := &fakeCommitService{err: errors.New("git failed")}
 	app := newCommitApp(fake)
-	app.root.SetArgs([]string{"commit"})
+	app.rootCmd.SetArgs([]string{"commit"})
 
 	if err := app.Execute(); err == nil {
 		t.Error("expected error to propagate from service")
@@ -149,7 +149,7 @@ func TestCommitCmd_ServiceError_ReturnsError(t *testing.T) {
 func TestCommitCmd_PassesFlagsToService(t *testing.T) {
 	fake := &fakeCommitService{}
 	app := newCommitApp(fake)
-	app.root.SetArgs([]string{"commit", "--type", "fix", "--detailed"})
+	app.rootCmd.SetArgs([]string{"commit", "--type", "fix", "--detailed"})
 
 	if err := app.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -165,7 +165,7 @@ func TestCommitCmd_PassesFlagsToService(t *testing.T) {
 func TestCommitCmd_PassesExplainFlag(t *testing.T) {
 	fake := &fakeCommitService{}
 	app := newCommitApp(fake)
-	app.root.SetArgs([]string{"commit", "--explain"})
+	app.rootCmd.SetArgs([]string{"commit", "--explain"})
 
 	if err := app.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -211,8 +211,8 @@ func TestCommitCmd_TwoApps_IndependentFlagState(t *testing.T) {
 	app1 := newCommitApp(fake1)
 	app2 := newCommitApp(fake2)
 
-	app1.root.SetArgs([]string{"commit", "--type", "feat"})
-	app2.root.SetArgs([]string{"commit", "--type", "fix"})
+	app1.rootCmd.SetArgs([]string{"commit", "--type", "feat"})
+	app2.rootCmd.SetArgs([]string{"commit", "--type", "fix"})
 
 	if err := app1.Execute(); err != nil {
 		t.Fatalf("app1 error: %v", err)

@@ -9,13 +9,13 @@ import (
 // newPrApp returns a minimal App suitable for pr command tests.
 func newPrApp() *App {
 	app := &App{commitService: &fakeCommitService{}}
-	app.root = buildRootCmd(app)
+	app.rootCmd = buildRootCmd(app)
 	return app
 }
 
 func TestPrCmd_IsRegistered(t *testing.T) {
 	app := newPrApp()
-	cmd, _, err := app.root.Find([]string{"pr"})
+	cmd, _, err := app.rootCmd.Find([]string{"pr"})
 	if err != nil || cmd.Name() != "pr" {
 		t.Fatal("pr command not registered")
 	}
@@ -23,7 +23,7 @@ func TestPrCmd_IsRegistered(t *testing.T) {
 
 func TestPrCmd_Flags(t *testing.T) {
 	app := newPrApp()
-	cmd, _, _ := app.root.Find([]string{"pr"})
+	cmd, _, _ := app.rootCmd.Find([]string{"pr"})
 	f := cmd.Flags()
 
 	if f.Lookup("type") == nil {
@@ -42,7 +42,7 @@ func TestPrCmd_Flags(t *testing.T) {
 
 func TestPrCmd_FlagDefaults(t *testing.T) {
 	app := newPrApp()
-	cmd, _, _ := app.root.Find([]string{"pr"})
+	cmd, _, _ := app.rootCmd.Find([]string{"pr"})
 	f := cmd.Flags()
 
 	if f.Lookup("type").DefValue != "" {
@@ -55,7 +55,7 @@ func TestPrCmd_FlagDefaults(t *testing.T) {
 
 func TestPrCmd_ShortAndDetailedMutuallyExclusive(t *testing.T) {
 	app := newPrApp()
-	app.root.SetArgs([]string{"pr", "--short", "--detailed", "feature/foo", "main"})
+	app.rootCmd.SetArgs([]string{"pr", "--short", "--detailed", "feature/foo", "main"})
 
 	if err := app.Execute(); err == nil {
 		t.Error("expected error when --short and --detailed used together")
@@ -64,7 +64,7 @@ func TestPrCmd_ShortAndDetailedMutuallyExclusive(t *testing.T) {
 
 func TestPrCmd_RejectsOnePositionalArg(t *testing.T) {
 	app := newPrApp()
-	app.root.SetArgs([]string{"pr", "feature/foo"})
+	app.rootCmd.SetArgs([]string{"pr", "feature/foo"})
 
 	if err := app.Execute(); err == nil {
 		t.Error("expected error when only one positional arg is passed")
@@ -73,7 +73,7 @@ func TestPrCmd_RejectsOnePositionalArg(t *testing.T) {
 
 func TestPrCmd_RejectsZeroPositionalArgs(t *testing.T) {
 	app := newPrApp()
-	app.root.SetArgs([]string{"pr"})
+	app.rootCmd.SetArgs([]string{"pr"})
 
 	if err := app.Execute(); err == nil {
 		t.Error("expected error when no positional args are passed")
@@ -82,7 +82,7 @@ func TestPrCmd_RejectsZeroPositionalArgs(t *testing.T) {
 
 func TestPrCmd_RejectsThreePositionalArgs(t *testing.T) {
 	app := newPrApp()
-	app.root.SetArgs([]string{"pr", "feature/foo", "main", "extra"})
+	app.rootCmd.SetArgs([]string{"pr", "feature/foo", "main", "extra"})
 
 	if err := app.Execute(); err == nil {
 		t.Error("expected error when three positional args are passed")
@@ -92,7 +92,7 @@ func TestPrCmd_RejectsThreePositionalArgs(t *testing.T) {
 func TestPrCmd_RunsWithExactTwoArgs(t *testing.T) {
 	app := newPrApp()
 	// args[0] = source, args[1] = destination
-	app.root.SetArgs([]string{"pr", "feature/foo", "main"})
+	app.rootCmd.SetArgs([]string{"pr", "feature/foo", "main"})
 
 	if err := app.Execute(); err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -101,7 +101,7 @@ func TestPrCmd_RunsWithExactTwoArgs(t *testing.T) {
 
 func TestPrCmd_RunsWithFlags(t *testing.T) {
 	app := newPrApp()
-	app.root.SetArgs([]string{"pr", "--explain", "--detailed", "feature/foo", "main"})
+	app.rootCmd.SetArgs([]string{"pr", "--explain", "--detailed", "feature/foo", "main"})
 
 	if err := app.Execute(); err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -110,7 +110,7 @@ func TestPrCmd_RunsWithFlags(t *testing.T) {
 
 func TestPrCmd_InvalidType(t *testing.T) {
 	app := newPrApp()
-	app.root.SetArgs([]string{"pr", "--type", "invalid", "feature/foo", "main"})
+	app.rootCmd.SetArgs([]string{"pr", "--type", "invalid", "feature/foo", "main"})
 
 	err := app.Execute()
 	if err == nil {
@@ -126,7 +126,7 @@ func TestPrCmd_ValidTypes(t *testing.T) {
 	for _, tt := range types {
 		t.Run(tt, func(t *testing.T) {
 			app := newPrApp()
-			app.root.SetArgs([]string{"pr", "--type", tt, "feature/foo", "main"})
+			app.rootCmd.SetArgs([]string{"pr", "--type", tt, "feature/foo", "main"})
 			if err := app.Execute(); err != nil {
 				t.Errorf("unexpected error for type %q: %v", tt, err)
 			}

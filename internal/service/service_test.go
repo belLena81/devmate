@@ -2,6 +2,8 @@ package service
 
 import (
 	"errors"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 )
@@ -43,6 +45,7 @@ func TestCommitService_DraftsMessage(t *testing.T) {
 		LLM: &fakeLLM{
 			response: "feat: add new feature",
 		},
+		Log: noopLogger(),
 	}
 
 	opts := CommitOptions{}
@@ -57,6 +60,10 @@ func TestCommitService_DraftsMessage(t *testing.T) {
 	}
 }
 
+func noopLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
 func TestCommitService_PassesDiffToLLM(t *testing.T) {
 	var receivedPrompt string
 
@@ -68,6 +75,7 @@ func TestCommitService_PassesDiffToLLM(t *testing.T) {
 			},
 			response: "msg",
 		},
+		Log: noopLogger(),
 	}
 
 	opts := CommitOptions{}
@@ -96,6 +104,7 @@ func TestCommitService_GitError(t *testing.T) {
 	svc := Service{
 		Git: &errorGit{},
 		LLM: &fakeLLM{},
+		Log: noopLogger(),
 	}
 
 	opts := CommitOptions{}

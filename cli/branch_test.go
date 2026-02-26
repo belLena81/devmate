@@ -9,13 +9,13 @@ import (
 // newBranchApp returns a minimal App suitable for branch command tests.
 func newBranchApp() *App {
 	app := &App{commitService: &fakeCommitService{}}
-	app.root = buildRootCmd(app)
+	app.rootCmd = buildRootCmd(app)
 	return app
 }
 
 func TestBranchCmd_IsRegistered(t *testing.T) {
 	app := newBranchApp()
-	cmd, _, err := app.root.Find([]string{"branch"})
+	cmd, _, err := app.rootCmd.Find([]string{"branch"})
 	if err != nil || cmd.Name() != "branch" {
 		t.Fatal("branch command not registered")
 	}
@@ -23,7 +23,7 @@ func TestBranchCmd_IsRegistered(t *testing.T) {
 
 func TestBranchCmd_Flags(t *testing.T) {
 	app := newBranchApp()
-	cmd, _, _ := app.root.Find([]string{"branch"})
+	cmd, _, _ := app.rootCmd.Find([]string{"branch"})
 	f := cmd.Flags()
 
 	if f.Lookup("type") == nil {
@@ -42,7 +42,7 @@ func TestBranchCmd_Flags(t *testing.T) {
 
 func TestBranchCmd_FlagDefaults(t *testing.T) {
 	app := newBranchApp()
-	cmd, _, _ := app.root.Find([]string{"branch"})
+	cmd, _, _ := app.rootCmd.Find([]string{"branch"})
 	f := cmd.Flags()
 
 	if f.Lookup("type").DefValue != "" {
@@ -55,7 +55,7 @@ func TestBranchCmd_FlagDefaults(t *testing.T) {
 
 func TestBranchCmd_ShortAndDetailedMutuallyExclusive(t *testing.T) {
 	app := newBranchApp()
-	app.root.SetArgs([]string{"branch", "--short", "--detailed", "some task description"})
+	app.rootCmd.SetArgs([]string{"branch", "--short", "--detailed", "some task description"})
 
 	if err := app.Execute(); err == nil {
 		t.Error("expected error when --short and --detailed used together")
@@ -64,7 +64,7 @@ func TestBranchCmd_ShortAndDetailedMutuallyExclusive(t *testing.T) {
 
 func TestBranchCmd_RejectsZeroPositionalArgs(t *testing.T) {
 	app := newBranchApp()
-	app.root.SetArgs([]string{"branch"})
+	app.rootCmd.SetArgs([]string{"branch"})
 
 	if err := app.Execute(); err == nil {
 		t.Error("expected error when no positional arg is passed")
@@ -73,7 +73,7 @@ func TestBranchCmd_RejectsZeroPositionalArgs(t *testing.T) {
 
 func TestBranchCmd_RejectsTwoPositionalArgs(t *testing.T) {
 	app := newBranchApp()
-	app.root.SetArgs([]string{"branch", "task one", "task two"})
+	app.rootCmd.SetArgs([]string{"branch", "task one", "task two"})
 
 	if err := app.Execute(); err == nil {
 		t.Error("expected error when two positional args are passed")
@@ -82,7 +82,7 @@ func TestBranchCmd_RejectsTwoPositionalArgs(t *testing.T) {
 
 func TestBranchCmd_RunsWithExactOneArg(t *testing.T) {
 	app := newBranchApp()
-	app.root.SetArgs([]string{"branch", "some task description"})
+	app.rootCmd.SetArgs([]string{"branch", "some task description"})
 
 	if err := app.Execute(); err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -91,7 +91,7 @@ func TestBranchCmd_RunsWithExactOneArg(t *testing.T) {
 
 func TestBranchCmd_InvalidType(t *testing.T) {
 	app := newBranchApp()
-	app.root.SetArgs([]string{"branch", "--type", "invalid", "some task description"})
+	app.rootCmd.SetArgs([]string{"branch", "--type", "invalid", "some task description"})
 
 	err := app.Execute()
 	if err == nil {
@@ -107,7 +107,7 @@ func TestBranchCmd_ValidTypes(t *testing.T) {
 	for _, tt := range types {
 		t.Run(tt, func(t *testing.T) {
 			app := newBranchApp()
-			app.root.SetArgs([]string{"branch", "--type", tt, "some task description"})
+			app.rootCmd.SetArgs([]string{"branch", "--type", tt, "some task description"})
 			if err := app.Execute(); err != nil {
 				t.Errorf("unexpected error for type %q: %v", tt, err)
 			}

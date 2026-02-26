@@ -68,7 +68,7 @@ Note:
 		Args: cobra.ExactArgs(2),
 		RunE: validateAndRunPr,
 	}
-	rootCmd.AddCommand(prCmd)
+	//a.rootCmd.AddCommand(prCmd)
 
 	prCmd.Flags().StringVarP(
 		&rawCmdType,

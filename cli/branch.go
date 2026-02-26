@@ -61,7 +61,7 @@ Note:
 		Args: cobra.ExactArgs(1),
 		RunE: validateAndRunBranch,
 	}
-	rootCmd.AddCommand(branchCmd)
+	//a.rootCmd.AddCommand(branchCmd)
 
 	branchCmd.Flags().StringVarP(
 		&rawCmdType,
