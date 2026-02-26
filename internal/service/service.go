@@ -3,6 +3,7 @@ package service
 import (
 	"devmate/internal/domain"
 	"log/slog"
+	"strings"
 )
 
 type Service struct {
@@ -78,14 +79,14 @@ func (s *Service) DraftPrDescription(o PrOptions) (string, error) {
 	mode := o.Mode.String()
 	s.Log.Debug("drafting pr description: branch names", "source", o.SourceBranch, "destination", o.DestinationBranch, "type", cmdType, "mode", mode)
 
-	diff, err := s.Git.Compare(o.SourceBranch, o.DestinationBranch)
+	commits, err := s.Git.LogBetween(o.SourceBranch, o.DestinationBranch)
 	if err != nil {
 		s.Log.Error("failed to get diff", "error", err)
 		return "", err
 	}
 
-	s.Log.Debug("got diff", "bytes", len(diff)) // size not content
-	prompt := BuildPrPrompt(diff, o)
+	s.Log.Debug("got diff", "bytes", len(commits)) // size not content
+	prompt := BuildPrPrompt(commits, o)
 	result, err := s.LLM.Generate(prompt)
 	if err != nil {
 		s.Log.Error("LLM generation failed", "error", err)
@@ -104,6 +105,6 @@ func BuildBranchPrompt(o BranchOptions) string {
 	return o.Task
 }
 
-func BuildPrPrompt(diff string, o PrOptions) string {
-	return diff
+func BuildPrPrompt(commits []string, o PrOptions) string {
+	return strings.Join(commits, "\n")
 }

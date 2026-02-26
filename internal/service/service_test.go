@@ -9,20 +9,16 @@ import (
 )
 
 type fakeGit struct {
-	diff   string
-	branch string
+	diff    string
+	commits []string
 }
 
 func (f *fakeGit) DiffCached() (string, error) {
 	return f.diff, nil
 }
 
-func (f *fakeGit) CurrentBranch() (string, error) {
-	return f.branch, nil
-}
-
-func (f *fakeGit) Compare(base, head string) (string, error) {
-	return f.diff, nil
+func (f *fakeGit) LogBetween(base, head string) ([]string, error) {
+	return f.commits, nil
 }
 
 type fakeLLM struct {
@@ -93,12 +89,9 @@ type errorGit struct{}
 func (e *errorGit) DiffCached() (string, error) {
 	return "", errors.New("git failed")
 }
-func (e *errorGit) CurrentBranch() (string, error) {
-	return "", errors.New("git failed")
-}
 
-func (e *errorGit) Compare(base, head string) (string, error) {
-	return "", errors.New("git failed")
+func (e *errorGit) LogBetween(base, head string) ([]string, error) {
+	return nil, errors.New("git failed")
 }
 
 func TestCommitService_GitError(t *testing.T) {
@@ -162,13 +155,13 @@ func TestPrService_DraftsPrDescription(t *testing.T) {
 func TestPrService_PassesDiffToLLM(t *testing.T) {
 	var received string
 	svc := Service{
-		Git: &fakeGit{diff: "PR DIFF"},
+		Git: &fakeGit{commits: []string{"one", "two"}},
 		LLM: &fakeLLM{onGenerate: func(p string) { received = p }},
 		Log: noopLogger(),
 	}
 	svc.DraftPrDescription(PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
-	if !strings.Contains(received, "PR DIFF") {
-		t.Errorf("diff not in prompt, got: %q", received)
+	if !strings.Contains(received, "one\ntwo") {
+		t.Errorf("commits are not in prompt, got: %q", received)
 	}
 }
 

@@ -25,9 +25,8 @@ type stubGit struct {
 	err    error
 }
 
-func (s *stubGit) DiffCached() (string, error)               { return s.diff, s.err }
-func (s *stubGit) CurrentBranch() (string, error)            { return s.branch, s.err }
-func (s *stubGit) Compare(base, head string) (string, error) { return "", s.err }
+func (s *stubGit) DiffCached() (string, error)                    { return s.diff, s.err }
+func (s *stubGit) LogBetween(base, head string) ([]string, error) { return nil, s.err }
 
 type stubLLM struct {
 	response string
