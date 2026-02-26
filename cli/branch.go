@@ -21,10 +21,22 @@ func NewBranch(task string, cmdType string, short, detailed, explain bool) (serv
 	return service.BranchOptions{task, domain.Options{ct, parseCmdMode(detailed), explain}}, nil
 }
 
-var branchCmd = &cobra.Command{
-	Use:   "branch [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] text",
-	Short: "Create a branch name from the given task description",
-	Long: `Generates a branch name from a plain-text task description.
+func newBranchCmd(a *App) *cobra.Command {
+	validateAndRunBranch := func(cmd *cobra.Command, args []string) error {
+		var err error
+		BranchOpts, err = NewBranch(args[0], rawCmdType, rawShort, rawDetailed, explain)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), BranchOpts)
+		//call service to run a command
+		return nil
+	}
+
+	branchCmd := &cobra.Command{
+		Use:   "branch [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] text",
+		Short: "Create a branch name from the given task description",
+		Long: `Generates a branch name from a plain-text task description.
 
 The command takes a single required argument — a short description of the task
 (e.g. "add user authentication" or "fix login page crash") — and produces a
@@ -46,11 +58,9 @@ Note:
   --short and --detailed are mutually exclusive.
   If neither is provided, a short format is used.
 `,
-	Args: cobra.ExactArgs(1),
-	RunE: validateAndRunBranch,
-}
-
-func init() {
+		Args: cobra.ExactArgs(1),
+		RunE: validateAndRunBranch,
+	}
 	rootCmd.AddCommand(branchCmd)
 
 	branchCmd.Flags().StringVarP(
@@ -85,15 +95,5 @@ func init() {
 	// Make short and detailed mutually exclusive
 	branchCmd.MarkFlagsMutuallyExclusive("short", "detailed")
 
-}
-
-func validateAndRunBranch(cmd *cobra.Command, args []string) error {
-	var err error
-	BranchOpts, err = NewBranch(args[0], rawCmdType, rawShort, rawDetailed, explain)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), BranchOpts)
-	//call service to run a command
-	return nil
+	return branchCmd
 }

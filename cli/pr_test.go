@@ -1,21 +1,30 @@
 package cli
 
 import (
-	"bytes"
 	"devmate/internal/domain"
 	"errors"
 	"testing"
 )
 
+// newPrApp returns a minimal App suitable for pr command tests.
+func newPrApp() *App {
+	app := &App{commitService: &fakeCommitService{}}
+	app.root = buildRootCmd(app)
+	return app
+}
+
 func TestPrCmd_IsRegistered(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"pr"})
+	app := newPrApp()
+	cmd, _, err := app.root.Find([]string{"pr"})
 	if err != nil || cmd.Name() != "pr" {
 		t.Fatal("pr command not registered")
 	}
 }
 
 func TestPrCmd_Flags(t *testing.T) {
-	f := prCmd.Flags()
+	app := newPrApp()
+	cmd, _, _ := app.root.Find([]string{"pr"})
+	f := cmd.Flags()
 
 	if f.Lookup("type") == nil {
 		t.Error("missing --type flag")
@@ -32,85 +41,80 @@ func TestPrCmd_Flags(t *testing.T) {
 }
 
 func TestPrCmd_FlagDefaults(t *testing.T) {
-	if prCmd.Flags().Lookup("type").DefValue != "" {
+	app := newPrApp()
+	cmd, _, _ := app.root.Find([]string{"pr"})
+	f := cmd.Flags()
+
+	if f.Lookup("type").DefValue != "" {
 		t.Error("--type default should be empty string")
 	}
-	if prCmd.Flags().Lookup("explain").DefValue != "false" {
+	if f.Lookup("explain").DefValue != "false" {
 		t.Error("--explain default should be false")
 	}
 }
 
 func TestPrCmd_ShortAndDetailedMutuallyExclusive(t *testing.T) {
-	t.Cleanup(func() {
-		rootCmd.SetArgs(nil)
-		resetFlags()
-	})
-	rootCmd.SetArgs([]string{"pr", "--short", "--detailed", "source", "target"})
-	err := rootCmd.Execute()
-	if err == nil {
+	app := newPrApp()
+	app.root.SetArgs([]string{"pr", "--short", "--detailed", "feature/foo", "main"})
+
+	if err := app.Execute(); err == nil {
 		t.Error("expected error when --short and --detailed used together")
 	}
 }
 
-func TestPrCmd_RejectsNonTwoPositionalArg(t *testing.T) {
-	t.Cleanup(func() {
-		rootCmd.SetArgs(nil)
-		resetFlags()
-	})
-	rootCmd.SetArgs([]string{"pr", "target"})
+func TestPrCmd_RejectsOnePositionalArg(t *testing.T) {
+	app := newPrApp()
+	app.root.SetArgs([]string{"pr", "feature/foo"})
 
-	err := rootCmd.Execute()
-	if err == nil {
-		t.Error("expected error when positional args shorter than 2")
-	}
-	t.Cleanup(func() {
-		rootCmd.SetArgs(nil)
-		resetFlags()
-	})
-	rootCmd.SetArgs([]string{"pr"})
-
-	err = rootCmd.Execute()
-	if err == nil {
-		t.Error("expected error when positional args shorter than 2")
-	}
-
-	t.Cleanup(func() {
-		rootCmd.SetArgs(nil)
-		resetFlags()
-	})
-	rootCmd.SetArgs([]string{"pr", "target", "source", "branch name"})
-
-	err = rootCmd.Execute()
-	if err == nil {
-		t.Error("expected error when positional args longer than 2")
+	if err := app.Execute(); err == nil {
+		t.Error("expected error when only one positional arg is passed")
 	}
 }
 
-func TestPrCmd_RunsWithExactTwoArg(t *testing.T) {
-	t.Cleanup(func() {
-		rootCmd.SetArgs(nil)
-		resetFlags()
-	})
-	rootCmd.SetArgs([]string{"pr", "target", "source", "--explain", "--detailed"})
+func TestPrCmd_RejectsZeroPositionalArgs(t *testing.T) {
+	app := newPrApp()
+	app.root.SetArgs([]string{"pr"})
 
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := app.Execute(); err == nil {
+		t.Error("expected error when no positional args are passed")
+	}
+}
+
+func TestPrCmd_RejectsThreePositionalArgs(t *testing.T) {
+	app := newPrApp()
+	app.root.SetArgs([]string{"pr", "feature/foo", "main", "extra"})
+
+	if err := app.Execute(); err == nil {
+		t.Error("expected error when three positional args are passed")
+	}
+}
+
+func TestPrCmd_RunsWithExactTwoArgs(t *testing.T) {
+	app := newPrApp()
+	// args[0] = source, args[1] = destination
+	app.root.SetArgs([]string{"pr", "feature/foo", "main"})
+
+	if err := app.Execute(); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestPrCmd_RunsWithFlags(t *testing.T) {
+	app := newPrApp()
+	app.root.SetArgs([]string{"pr", "--explain", "--detailed", "feature/foo", "main"})
+
+	if err := app.Execute(); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestPrCmd_InvalidType(t *testing.T) {
-	buf := &bytes.Buffer{}
-	t.Cleanup(func() {
-		rootCmd.SetArgs(nil)
-		resetFlags()
-	})
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"pr", "--type", "invalid", "target", "source"})
+	app := newPrApp()
+	app.root.SetArgs([]string{"pr", "--type", "invalid", "feature/foo", "main"})
 
-	err := rootCmd.Execute()
+	err := app.Execute()
 	if err == nil {
-		t.Error("expected error for invalid --type value")
+		t.Fatal("expected error for invalid --type value")
 	}
 	if !errors.Is(err, domain.ErrInvalidCmdType) {
 		t.Errorf("expected ErrInvalidCmdType, got %v", err)
@@ -121,48 +125,69 @@ func TestPrCmd_ValidTypes(t *testing.T) {
 	types := []string{"feat", "fix", "chore", "docs", "refactor"}
 	for _, tt := range types {
 		t.Run(tt, func(t *testing.T) {
-			t.Cleanup(func() {
-				rootCmd.SetArgs(nil)
-				resetFlags()
-			})
-			rootCmd.SetArgs([]string{"pr", "--type", tt, "target", "source"})
-			if err := rootCmd.Execute(); err != nil {
+			app := newPrApp()
+			app.root.SetArgs([]string{"pr", "--type", tt, "feature/foo", "main"})
+			if err := app.Execute(); err != nil {
 				t.Errorf("unexpected error for type %q: %v", tt, err)
 			}
 		})
 	}
 }
 
-func TestNewPr_MissingTarget(t *testing.T) {
-	_, err := NewPr("source", "", "", true, false, false)
-	if !errors.Is(err, domain.MissingTargetBranch) {
-		t.Errorf("expected MissingTargetBranch, got %v", err)
-	}
-}
+// ─── NewPr unit tests ────────────────────────────────────────────────────────
 
 func TestNewPr_MissingSource(t *testing.T) {
-	_, err := NewPr("", "target", "", true, false, false)
+	_, err := NewPr("", "main", "", false, false, false)
 	if !errors.Is(err, domain.MissingSourceBranch) {
 		t.Errorf("expected MissingSourceBranch, got %v", err)
 	}
 }
 
+func TestNewPr_MissingDestination(t *testing.T) {
+	_, err := NewPr("feature/foo", "", "", false, false, false)
+	if !errors.Is(err, domain.MissingTargetBranch) {
+		t.Errorf("expected MissingTargetBranch, got %v", err)
+	}
+}
+
 func TestNewPr_ValidConstruction(t *testing.T) {
-	opts, err := NewPr("main", "feature/foo", "feat", false, false, false)
+	opts, err := NewPr("feature/foo", "main", "feat", false, false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if opts.SourceBranch != "main" || opts.DestinationBranch != "feature/foo" {
-		t.Error("branch names not set correctly")
+	// Arg order: source first, destination second.
+	if opts.SourceBranch != "feature/foo" {
+		t.Errorf("expected SourceBranch %q, got %q", "feature/foo", opts.SourceBranch)
+	}
+	if opts.DestinationBranch != "main" {
+		t.Errorf("expected DestinationBranch %q, got %q", "main", opts.DestinationBranch)
 	}
 	if opts.Type != domain.Feat {
-		t.Error("type not set correctly")
+		t.Errorf("expected Feat, got %v", opts.Type)
 	}
 }
 
 func TestNewPr_InvalidType(t *testing.T) {
-	_, err := NewPr("main", "feature/foo", "invalid", false, false, false)
+	_, err := NewPr("feature/foo", "main", "invalid", false, false, false)
 	if !errors.Is(err, domain.ErrInvalidCmdType) {
 		t.Errorf("expected ErrInvalidCmdType, got %v", err)
+	}
+}
+
+// TestPrCmd_ArgOrder confirms that the first positional arg is the source
+// branch and the second is the destination — this locks down the fixed arg
+// order bug described in the architecture review.
+func TestPrCmd_ArgOrder_SourceFirst_DestinationSecond(t *testing.T) {
+	// We inspect what NewPr would produce for a known pair of args to verify
+	// order without needing a service spy.
+	opts, err := NewPr("feature/login", "main", "", false, false, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.SourceBranch != "feature/login" {
+		t.Errorf("first arg should be source, got SourceBranch=%q", opts.SourceBranch)
+	}
+	if opts.DestinationBranch != "main" {
+		t.Errorf("second arg should be destination, got DestinationBranch=%q", opts.DestinationBranch)
 	}
 }

@@ -21,8 +21,6 @@ var (
 	rawDetailed bool
 )
 
-var cmdService CommitService
-
 func init() {
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 }

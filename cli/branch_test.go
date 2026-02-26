@@ -1,21 +1,30 @@
 package cli
 
 import (
-	"bytes"
 	"devmate/internal/domain"
 	"errors"
 	"testing"
 )
 
+// newBranchApp returns a minimal App suitable for branch command tests.
+func newBranchApp() *App {
+	app := &App{commitService: &fakeCommitService{}}
+	app.root = buildRootCmd(app)
+	return app
+}
+
 func TestBranchCmd_IsRegistered(t *testing.T) {
-	cmd, _, err := rootCmd.Find([]string{"branch"})
+	app := newBranchApp()
+	cmd, _, err := app.root.Find([]string{"branch"})
 	if err != nil || cmd.Name() != "branch" {
 		t.Fatal("branch command not registered")
 	}
 }
 
 func TestBranchCmd_Flags(t *testing.T) {
-	f := branchCmd.Flags()
+	app := newBranchApp()
+	cmd, _, _ := app.root.Find([]string{"branch"})
+	f := cmd.Flags()
 
 	if f.Lookup("type") == nil {
 		t.Error("missing --type flag")
@@ -32,74 +41,61 @@ func TestBranchCmd_Flags(t *testing.T) {
 }
 
 func TestBranchCmd_FlagDefaults(t *testing.T) {
-	if branchCmd.Flags().Lookup("type").DefValue != "" {
+	app := newBranchApp()
+	cmd, _, _ := app.root.Find([]string{"branch"})
+	f := cmd.Flags()
+
+	if f.Lookup("type").DefValue != "" {
 		t.Error("--type default should be empty string")
 	}
-	if branchCmd.Flags().Lookup("explain").DefValue != "false" {
+	if f.Lookup("explain").DefValue != "false" {
 		t.Error("--explain default should be false")
 	}
 }
 
 func TestBranchCmd_ShortAndDetailedMutuallyExclusive(t *testing.T) {
-	rootCmd.SetArgs([]string{"branch", "--short", "--detailed", "some task description"})
-	t.Cleanup(func() {
-		rootCmd.SetArgs(nil)
-		resetFlags()
-	})
-	err := rootCmd.Execute()
-	if err == nil {
+	app := newBranchApp()
+	app.root.SetArgs([]string{"branch", "--short", "--detailed", "some task description"})
+
+	if err := app.Execute(); err == nil {
 		t.Error("expected error when --short and --detailed used together")
 	}
 }
 
-func TestBranchCmd_RejectsSecondPositionalArg(t *testing.T) {
-	rootCmd.SetArgs([]string{"branch", "some task description", "another task description"})
-	t.Cleanup(func() {
-		rootCmd.SetArgs(nil)
-		resetFlags()
-	})
+func TestBranchCmd_RejectsZeroPositionalArgs(t *testing.T) {
+	app := newBranchApp()
+	app.root.SetArgs([]string{"branch"})
 
-	err := rootCmd.Execute()
-	if err == nil {
-		t.Error("expected error when positional args longer than 1")
+	if err := app.Execute(); err == nil {
+		t.Error("expected error when no positional arg is passed")
 	}
-	rootCmd.SetArgs([]string{"branch"})
-	t.Cleanup(func() {
-		rootCmd.SetArgs(nil)
-		resetFlags()
-	})
+}
 
-	err = rootCmd.Execute()
-	if err == nil {
-		t.Error("expected error when positional args shorter than 1")
+func TestBranchCmd_RejectsTwoPositionalArgs(t *testing.T) {
+	app := newBranchApp()
+	app.root.SetArgs([]string{"branch", "task one", "task two"})
+
+	if err := app.Execute(); err == nil {
+		t.Error("expected error when two positional args are passed")
 	}
 }
 
 func TestBranchCmd_RunsWithExactOneArg(t *testing.T) {
-	rootCmd.SetArgs([]string{"branch", "some task description"})
-	t.Cleanup(func() {
-		rootCmd.SetArgs(nil)
-		resetFlags()
-	})
+	app := newBranchApp()
+	app.root.SetArgs([]string{"branch", "some task description"})
 
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := app.Execute(); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
 func TestBranchCmd_InvalidType(t *testing.T) {
-	buf := &bytes.Buffer{}
-	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"branch", "--type", "invalid", "some task description"})
-	t.Cleanup(func() {
-		rootCmd.SetArgs(nil)
-		resetFlags()
-	})
+	app := newBranchApp()
+	app.root.SetArgs([]string{"branch", "--type", "invalid", "some task description"})
 
-	err := rootCmd.Execute()
+	err := app.Execute()
 	if err == nil {
-		t.Error("expected error for invalid --type value")
+		t.Fatal("expected error for invalid --type value")
 	}
 	if !errors.Is(err, domain.ErrInvalidCmdType) {
 		t.Errorf("expected ErrInvalidCmdType, got %v", err)
@@ -110,12 +106,9 @@ func TestBranchCmd_ValidTypes(t *testing.T) {
 	types := []string{"feat", "fix", "chore", "docs", "refactor"}
 	for _, tt := range types {
 		t.Run(tt, func(t *testing.T) {
-			rootCmd.SetArgs([]string{"branch", "--type", tt, "some task description"})
-			t.Cleanup(func() {
-				rootCmd.SetArgs(nil)
-				resetFlags()
-			})
-			if err := rootCmd.Execute(); err != nil {
+			app := newBranchApp()
+			app.root.SetArgs([]string{"branch", "--type", tt, "some task description"})
+			if err := app.Execute(); err != nil {
 				t.Errorf("unexpected error for type %q: %v", tt, err)
 			}
 		})
@@ -126,5 +119,25 @@ func TestNewBranch_MissingTask(t *testing.T) {
 	_, err := NewBranch("", "", false, false, false)
 	if !errors.Is(err, domain.MissingTaskDescription) {
 		t.Errorf("expected MissingTaskDescription, got %v", err)
+	}
+}
+
+func TestNewBranch_ValidConstruction(t *testing.T) {
+	opts, err := NewBranch("add auth", "feat", false, false, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.Task != "add auth" {
+		t.Errorf("expected task %q, got %q", "add auth", opts.Task)
+	}
+	if opts.Type != domain.Feat {
+		t.Errorf("expected Feat, got %v", opts.Type)
+	}
+}
+
+func TestNewBranch_InvalidType(t *testing.T) {
+	_, err := NewBranch("task", "invalid", false, false, false)
+	if !errors.Is(err, domain.ErrInvalidCmdType) {
+		t.Errorf("expected ErrInvalidCmdType, got %v", err)
 	}
 }

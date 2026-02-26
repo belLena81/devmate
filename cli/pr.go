@@ -24,10 +24,21 @@ func NewPr(source, target string, cmdType string, short, detailed, explain bool)
 	return service.PrOptions{source, target, domain.Options{ct, parseCmdMode(detailed), explain}}, nil
 }
 
-var prCmd = &cobra.Command{
-	Use:   "pr [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] target source",
-	Short: "Create a pr text from git log between heads given branch names",
-	Long: `Generates pull request title and description from the git log between two branches.
+func newPrCmd(a *App) *cobra.Command {
+	validateAndRunPr := func(cmd *cobra.Command, args []string) error {
+		var err error
+		PrOpts, err = NewPr(args[0], args[1], rawCmdType, rawShort, rawDetailed, explain)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), PrOpts)
+		//call service to run a command
+		return nil
+	}
+	prCmd := &cobra.Command{
+		Use:   "pr [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] target source",
+		Short: "Create a pr text from git log between heads given branch names",
+		Long: `Generates pull request title and description from the git log between two branches.
 
 The command takes two required arguments — the source branch (your feature branch)
 and the target branch (e.g. main or develop) — and produces a PR title and body
@@ -54,11 +65,9 @@ Note:
   --short and --detailed are mutually exclusive.
   If neither is provided, a short format is used.
 `,
-	Args: cobra.ExactArgs(2),
-	RunE: validateAndRunPr,
-}
-
-func init() {
+		Args: cobra.ExactArgs(2),
+		RunE: validateAndRunPr,
+	}
 	rootCmd.AddCommand(prCmd)
 
 	prCmd.Flags().StringVarP(
@@ -92,15 +101,5 @@ func init() {
 
 	// Make short and detailed mutually exclusive
 	prCmd.MarkFlagsMutuallyExclusive("short", "detailed")
-}
-
-func validateAndRunPr(cmd *cobra.Command, args []string) error {
-	var err error
-	PrOpts, err = NewPr(args[0], args[1], rawCmdType, rawShort, rawDetailed, explain)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), PrOpts)
-	//call service to run a command
-	return nil
+	return prCmd
 }

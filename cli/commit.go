@@ -22,19 +22,53 @@ type CommitService interface {
 	DraftMessage(opt service.CommitOptions) (string, error)
 }
 
-type fakeCommitService struct {
-	response string
-	err      error
-	options  service.CommitOptions
-}
+func newCommitCmd(a *App) *cobra.Command {
+	validateAndRunCommit := func(cmd *cobra.Command, args []string) error {
+		//validate type and prepare options
+		var err error
+		commitOpts, err = NewCommit(rawCmdType, rawShort, rawDetailed, explain)
+		if err != nil {
+			return err
+		}
+		if a.commitService == nil {
+			// real construction — wired once you have infra ready
+			return domain.ServiceNotInitialized
+		}
+		msg, err := a.commitService.DraftMessage(commitOpts)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), msg)
+		return nil
+	}
 
-func (f *fakeCommitService) DraftMessage(o service.CommitOptions) (string, error) {
-	f.options = o
-	return f.response, f.err
-}
+	commitCmd := &cobra.Command{
+		Use:   "commit [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain]",
+		Short: "Create a commit message from the given diff",
+		Long: `Analyzes staged changes (git diff --cached) and drafts a Conventional Commit message.
 
-func init() {
-	rootCmd.AddCommand(commitCmd)
+The command reads the current repository state in read-only mode and generates
+a suggested commit message using the configured LLM.
+
+By default, Devmate auto-detects the most appropriate commit type (feat, fix,
+chore, docs, refactor). You may explicitly provide a type override using --type.
+
+The output is plain text written to stdout. Devmate never executes git commit
+or mutates repository state.
+
+Flags:
+  -t, --type string     Override commit type (feat, fix, chore, docs, refactor)
+      --explain         Provide reasoning behind the suggested commit message
+      --short           Generate a concise commit message (default)
+      --detailed        Generate a more descriptive commit message
+
+Note:
+  --short and --detailed are mutually exclusive.
+  If neither is provided, a short format is used.
+`,
+		Args: cobra.NoArgs,
+		RunE: validateAndRunCommit,
+	}
 
 	commitCmd.Flags().StringVarP(
 		&rawCmdType,
@@ -67,34 +101,7 @@ func init() {
 
 	// Make short and detailed mutually exclusive
 	commitCmd.MarkFlagsMutuallyExclusive("short", "detailed")
-}
-
-var commitCmd = &cobra.Command{
-	Use:   "commit [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain]",
-	Short: "Create a commit message from the given diff",
-	Long: `Analyzes staged changes (git diff --cached) and drafts a Conventional Commit message.
-
-The command reads the current repository state in read-only mode and generates
-a suggested commit message using the configured LLM.
-
-By default, Devmate auto-detects the most appropriate commit type (feat, fix,
-chore, docs, refactor). You may explicitly provide a type override using --type.
-
-The output is plain text written to stdout. Devmate never executes git commit
-or mutates repository state.
-
-Flags:
-  -t, --type string     Override commit type (feat, fix, chore, docs, refactor)
-      --explain         Provide reasoning behind the suggested commit message
-      --short           Generate a concise commit message (default)
-      --detailed        Generate a more descriptive commit message
-
-Note:
-  --short and --detailed are mutually exclusive.
-  If neither is provided, a short format is used.
-`,
-	Args: cobra.NoArgs,
-	RunE: validateAndRunCommit,
+	return commitCmd
 }
 
 func parseCmdType(raw string) (domain.CmdType, error) {
@@ -110,23 +117,4 @@ func parseCmdMode(detailed bool) domain.CmdMode {
 		return domain.Detailed
 	}
 	return domain.Short
-}
-
-func validateAndRunCommit(cmd *cobra.Command, args []string) error {
-	//validate type and prepare options
-	var err error
-	commitOpts, err = NewCommit(rawCmdType, rawShort, rawDetailed, explain)
-	if err != nil {
-		return err
-	}
-	if cmdService == nil {
-		// real construction — wired once you have infra ready
-		return domain.ServiceNotInitialized
-	}
-	msg, err := cmdService.DraftMessage(commitOpts)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintln(cmd.OutOrStdout(), msg)
-	return nil
 }
