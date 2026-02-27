@@ -12,6 +12,9 @@ import (
 // while leaving room for the prompt template and the generated response.
 const DefaultChunkThreshold = 3000
 
+// DefaultServiceMaxConcurrency is the default number of parallel LLM calls.
+const DefaultServiceMaxConcurrency = 2
+
 // Chunk is one piece of a diff together with the file names it covers.
 // File names are used only for logging — the content is what matters to the LLM.
 type Chunk struct {

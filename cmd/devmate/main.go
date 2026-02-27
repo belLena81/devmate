@@ -2,28 +2,46 @@ package main
 
 import (
 	"devmate/cli"
+	"devmate/internal/config"
 	"devmate/internal/infra/llm"
 	"devmate/internal/infra/progress"
 	"devmate/internal/service"
 	"log/slog"
 	"os"
-	"path/filepath"
 )
 
 func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		// Config errors are fatal: a bad config file should not silently fall
+		// back to defaults, as the user clearly intended a different value.
+		slog.New(slog.NewTextHandler(os.Stderr, nil)).
+			Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
+
 	stderr := progress.NewLockedWriter(os.Stderr)
 
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
+		Level: cfg.Log.SlogLevel(),
 	}))
 
-	ollamaClient := llm.NewOllamaClient(llm.WithLogger(log))
+	ollamaClient := llm.NewOllamaClientFromConfig(llm.ClientConfig{
+		BaseURL:        cfg.Ollama.BaseURL,
+		Model:          cfg.Ollama.Model,
+		HTTPMaxRetries: cfg.Ollama.HTTPMaxRetries,
+		RequestTimeout: cfg.Ollama.RequestTimeout(),
+		RetryBaseDelay: cfg.Ollama.RetryBaseDelay(),
+	}, llm.WithLogger(log))
 
-	cache := buildCache(log)
+	cache := buildCache(cfg.Cache.Dir, log)
 	spinner := progress.NewWriter(stderr)
 
 	svc := service.New(nil, ollamaClient, cache, ollamaClient.Model(), log)
 	svc.Progress = spinner
+	svc.ChunkThreshold = cfg.Service.ChunkThreshold
+	svc.MaxConcurrency = cfg.Service.MaxConcurrency
+	svc.MaxRetries = cfg.Service.MaxRetries
 
 	app := cli.NewAppWithService(svc)
 	if err := app.Execute(); err != nil {
@@ -31,13 +49,11 @@ func main() {
 	}
 }
 
-func buildCache(log *slog.Logger) service.Cache {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		log.Error("could not resolve home dir, caching disabled", "error", err)
+func buildCache(dir string, log *slog.Logger) service.Cache {
+	if dir == "" {
+		log.Error("could not resolve cache dir, caching disabled")
 		return service.NoopCache{}
 	}
-	dir := filepath.Join(home, ".cache", "devmate")
 	log.Debug("cache enabled", "dir", dir)
 	return service.NewDiskCache(dir)
 }

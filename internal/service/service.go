@@ -34,7 +34,7 @@ func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *s
 		Model:          model,
 		Log:            log.With("component", "service"),
 		ChunkThreshold: DefaultChunkThreshold,
-		MaxConcurrency: 2,
+		MaxConcurrency: DefaultServiceMaxConcurrency,
 		BinaryHash:     BinaryHash(),
 	}
 }

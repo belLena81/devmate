@@ -12,26 +12,18 @@ import (
 	"time"
 )
 
-const (
-	defaultBaseURL = "http://localhost:11434"
-	defaultModel   = "llama3.2:3b"
-	generatePath   = "/api/generate"
-
-	requestTimeout = 3 * time.Minute
-
-	DefaultMaxRetries = 3
-
-	retryBaseDelay = 2 * time.Second
-)
+const generatePath = "/api/generate"
 
 // OllamaClient calls a local Ollama server to generate text.
 // It implements domain.LLM.
 type OllamaClient struct {
-	baseURL    string
-	model      string
-	http       *http.Client
-	log        *slog.Logger
-	maxRetries int
+	baseURL        string
+	model          string
+	http           *http.Client
+	log            *slog.Logger
+	maxRetries     int
+	requestTimeout time.Duration
+	retryBaseDelay time.Duration
 }
 
 // Option configures an OllamaClient.
@@ -59,15 +51,28 @@ func WithMaxRetries(n int) Option {
 	return func(c *OllamaClient) { c.maxRetries = n }
 }
 
+// WithRequestTimeout sets the per-request timeout.
+func WithRequestTimeout(d time.Duration) Option {
+	return func(c *OllamaClient) { c.requestTimeout = d }
+}
+
+// WithRetryBaseDelay sets the initial back-off delay between retries.
+func WithRetryBaseDelay(d time.Duration) Option {
+	return func(c *OllamaClient) { c.retryBaseDelay = d }
+}
+
 // NewOllamaClient returns a ready-to-use OllamaClient.
 // Call with no arguments for sensible defaults; use Option functions to override.
+// In production, prefer NewOllamaClientFromConfig to wire all settings from Config.
 func NewOllamaClient(opts ...Option) *OllamaClient {
 	c := &OllamaClient{
-		baseURL:    defaultBaseURL,
-		model:      defaultModel,
-		http:       &http.Client{}, // no client-level timeout; each Generate call sets its own
-		log:        slog.Default().With("component", "ollama"),
-		maxRetries: DefaultMaxRetries,
+		baseURL:        "http://localhost:11434",
+		model:          "llama3.2:3b",
+		http:           &http.Client{}, // no client-level timeout; each Generate call sets its own
+		log:            slog.Default().With("component", "ollama"),
+		maxRetries:     3,
+		requestTimeout: 3 * time.Minute,
+		retryBaseDelay: 2 * time.Second,
 	}
 	for _, o := range opts {
 		o(c)
@@ -75,11 +80,33 @@ func NewOllamaClient(opts ...Option) *OllamaClient {
 	return c
 }
 
-// Model returns the model name this client is configured to use.
-func (c *OllamaClient) Model() string { return c.model }
+// ClientConfig holds the configuration values NewOllamaClientFromConfig uses.
+// Populate it from your application's config package.
+type ClientConfig struct {
+	BaseURL        string
+	Model          string
+	HTTPMaxRetries int
+	RequestTimeout time.Duration
+	RetryBaseDelay time.Duration
+}
+
+// NewOllamaClientFromConfig returns an OllamaClient fully configured from cfg.
+// Additional opts are applied after the config values, so they can still override.
+func NewOllamaClientFromConfig(cfg ClientConfig, opts ...Option) *OllamaClient {
+	return NewOllamaClient(append([]Option{
+		WithBaseURL(cfg.BaseURL),
+		WithModel(cfg.Model),
+		WithMaxRetries(cfg.HTTPMaxRetries),
+		WithRequestTimeout(cfg.RequestTimeout),
+		WithRetryBaseDelay(cfg.RetryBaseDelay),
+	}, opts...)...)
+}
 
 // BaseURL returns the server base URL this client is configured to use.
 func (c *OllamaClient) BaseURL() string { return c.baseURL }
+
+// Model returns the model name this client is configured to use.
+func (c *OllamaClient) Model() string { return c.model }
 
 // generateRequest is the JSON body sent to POST /api/generate.
 type generateRequest struct {
@@ -137,7 +164,7 @@ func (c *OllamaClient) Generate(prompt string) (string, error) {
 	}
 
 	var lastErr error
-	delay := retryBaseDelay
+	delay := c.retryBaseDelay
 
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
@@ -175,7 +202,7 @@ func (c *OllamaClient) Generate(prompt string) (string, error) {
 
 // doGenerate performs a single HTTP round-trip to /api/generate.
 func (c *OllamaClient) doGenerate(body []byte) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), c.requestTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+generatePath, bytes.NewReader(body))

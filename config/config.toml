@@ -1,3 +1,0 @@
-ollama_url   = "http://localhost:11434"
-ollama_model = "llama3.2:3b"
-log_level    = "info"

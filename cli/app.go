@@ -21,7 +21,7 @@ type App struct {
 // The git runner is resolved from the working directory.
 // Caching is disabled — use NewAppWithService for full wiring including cache.
 func NewApp(llm domain.LLM) *App {
-	svc := service.New(nil, llm, service.NoopCache{}, "", buildLogger())
+	svc := service.New(nil, llm, service.NoopCache{}, "", slog.Default())
 	return newAppFromService(svc)
 }
 
@@ -32,7 +32,13 @@ func NewAppWithService(svc *service.Service) *App {
 }
 
 func newAppFromService(svc *service.Service) *App {
-	log := buildLogger()
+	// Reuse the logger already configured on the service (respects the log
+	// level from config). Fall back to slog.Default() only when svc.Log is
+	// nil, which happens in tests that build a bare service without a logger.
+	log := svc.Log
+	if log == nil {
+		log = slog.Default()
+	}
 
 	repoRoot, err := git.RepoRoot()
 	if err != nil {
@@ -60,12 +66,6 @@ func (a *App) RootCmd() *cobra.Command {
 
 func InjectCommitService(app *App, svc CommitService) {
 	app.commitService = svc
-}
-
-func buildLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}))
 }
 
 func InjectBranchService(app *App, svc BranchService) {
