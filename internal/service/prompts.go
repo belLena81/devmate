@@ -23,6 +23,9 @@ var chunkTmpl string
 //go:embed _resources/synthesis.tmpl
 var synthesisTmpl string
 
+//go:embed _resources/reduce.tmpl
+var reduceTmpl string
+
 // commitData holds the values injected into commit.tmpl.
 type commitData struct {
 	TypeOverride string // empty when type is auto-detected
@@ -128,6 +131,20 @@ func BuildSynthesisPrompt(summaries []string, cmdType domain.CmdType, mode domai
 		Detailed:     mode == domain.Detailed,
 		Explain:      explain,
 		Summaries:    numbered,
+	})
+}
+
+// BuildReducePrompt builds a prompt that condenses a group of intermediate
+// summaries into a single shorter summary. Used when the collected chunk
+// summaries are too large to fit into a single synthesis prompt.
+func BuildReducePrompt(summaries []string) string {
+	numbered := make([]numberedSummary, len(summaries))
+	for i, s := range summaries {
+		numbered[i] = numberedSummary{N: i + 1, Text: s}
+	}
+
+	return mustRender("reduce", reduceTmpl, synthesisData{
+		Summaries: numbered,
 	})
 }
 

@@ -1,0 +1,14 @@
+You are a code analysis tool condensing multiple change summaries into a single shorter summary.
+
+Below are several summaries of code changes from different parts of a large diff.
+Merge them into ONE concise bullet-point summary that captures all important changes.
+Combine related items. Drop redundant detail. Keep every distinct logical change.
+
+Start each line with -
+Do not write a commit message. Do not write prose wrapping the bullets.
+Do not include a title line. Just the bullet list.
+
+Summaries:
+{{- range .Summaries}}
+{{.N}}. {{.Text}}
+{{- end}}

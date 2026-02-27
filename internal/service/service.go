@@ -94,6 +94,12 @@ func (s *Service) mapReduce(diff string, options CommitOptions) (string, error) 
 		summaries = append(summaries, summary)
 	}
 
+	// Hierarchically reduce summaries until they fit within the threshold.
+	summaries, err := s.reduceSummaries(summaries)
+	if err != nil {
+		return "", err
+	}
+
 	s.log().Debug("synthesizing", "summaries", summaries)
 
 	prompt := BuildSynthesisPrompt(summaries, options.Type, options.Mode, options.Explain)
@@ -104,6 +110,103 @@ func (s *Service) mapReduce(diff string, options CommitOptions) (string, error) 
 
 	s.log().Debug("synthesis complete", "result", result)
 	return result, nil
+}
+
+// reduceSummaries iteratively condenses summaries in groups until their
+// combined size fits within ChunkThreshold. Each iteration packs summaries
+// into groups that fit the threshold, sends each group to the LLM for
+// condensation, and replaces the list with the condensed results.
+// This guarantees the final synthesis prompt stays within model limits
+// regardless of how many chunks the original diff produced.
+func (s *Service) reduceSummaries(summaries []string) ([]string, error) {
+	for {
+		total := summariesSize(summaries)
+		if total <= s.ChunkThreshold || len(summaries) <= 1 {
+			return summaries, nil
+		}
+
+		s.log().Debug("summaries exceed threshold, reducing",
+			"summaries", len(summaries),
+			"total_bytes", total,
+			"threshold", s.ChunkThreshold,
+		)
+
+		groups := groupSummaries(summaries, s.ChunkThreshold)
+		reduced := make([]string, 0, len(groups))
+
+		for i, group := range groups {
+			// Single-item groups don't need an LLM call — pass through.
+			if len(group) == 1 {
+				reduced = append(reduced, group[0])
+				continue
+			}
+
+			s.log().Debug("reducing summary group",
+				"group", i+1,
+				"of", len(groups),
+				"items", len(group),
+			)
+
+			prompt := BuildReducePrompt(group)
+			condensed, err := s.LLM.Generate(prompt)
+			if err != nil {
+				return nil, fmt.Errorf("reducing summary group %d: %w", i+1, err)
+			}
+			reduced = append(reduced, condensed)
+		}
+
+		// Safety: if reduction made no progress, stop to avoid infinite loop.
+		if len(reduced) >= len(summaries) {
+			s.log().Debug("reduction made no progress, proceeding with current summaries",
+				"before", len(summaries), "after", len(reduced))
+			return reduced, nil
+		}
+
+		summaries = reduced
+	}
+}
+
+// summariesSize returns the total byte length of all summaries.
+func summariesSize(summaries []string) int {
+	n := 0
+	for _, s := range summaries {
+		n += len(s)
+	}
+	return n
+}
+
+// groupSummaries packs summaries into groups whose combined size does not
+// exceed maxSize. Each group will be sent to the LLM as one reduce call.
+func groupSummaries(summaries []string, maxSize int) [][]string {
+	var groups [][]string
+	var current []string
+	currentSize := 0
+
+	for _, s := range summaries {
+		// If a single summary exceeds maxSize, it gets its own group.
+		if len(s) > maxSize {
+			if len(current) > 0 {
+				groups = append(groups, current)
+				current = nil
+				currentSize = 0
+			}
+			groups = append(groups, []string{s})
+			continue
+		}
+
+		if currentSize+len(s) > maxSize && len(current) > 0 {
+			groups = append(groups, current)
+			current = nil
+			currentSize = 0
+		}
+		current = append(current, s)
+		currentSize += len(s)
+	}
+
+	if len(current) > 0 {
+		groups = append(groups, current)
+	}
+	return groups
 }
 
 func (s *Service) DraftMessage(o CommitOptions) (string, error) {
