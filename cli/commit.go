@@ -81,7 +81,7 @@ Note:
 		&explain,
 		"explain",
 		false,
-		"explaio why this commit message was generated",
+		"explain why this commit message was generated",
 	)
 
 	commitCmd.Flags().BoolVar(

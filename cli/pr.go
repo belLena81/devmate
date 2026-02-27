@@ -81,28 +81,28 @@ Note:
 		"type",
 		"t",
 		"",
-		"force branch task type (feat, fix, chore, docs, refactor)",
+		"force pr description type (feat, fix, chore, docs, refactor)",
 	)
 
 	prCmd.Flags().BoolVar(
 		&explain,
 		"explain",
 		false,
-		"explain why this branch name was generated",
+		"explain why this pr description was generated",
 	)
 
 	prCmd.Flags().BoolVar(
 		&rawShort,
 		"short",
 		false,
-		"generate concise few words branch name (default)",
+		"generate concise bullet points only pr description (default)",
 	)
 
 	prCmd.Flags().BoolVar(
 		&rawDetailed,
 		"detailed",
 		false,
-		"generate detailed verbose branch name",
+		"generate detailed verbose pr description",
 	)
 
 	// Make short and detailed mutually exclusive

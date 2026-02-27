@@ -174,12 +174,7 @@ func TestNewPr_InvalidType(t *testing.T) {
 	}
 }
 
-// TestPrCmd_ArgOrder confirms that the first positional arg is the source
-// branch and the second is the destination — this locks down the fixed arg
-// order bug described in the architecture review.
 func TestPrCmd_ArgOrder_SourceFirst_DestinationSecond(t *testing.T) {
-	// We inspect what NewPr would produce for a known pair of args to verify
-	// order without needing a service spy.
 	opts, err := NewPr("feature/login", "main", "", false, false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

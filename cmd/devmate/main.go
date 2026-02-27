@@ -3,6 +3,7 @@ package main
 import (
 	"devmate/cli"
 	"devmate/internal/infra/llm"
+	"devmate/internal/infra/progress"
 	"devmate/internal/service"
 	"log/slog"
 	"os"
@@ -10,15 +11,20 @@ import (
 )
 
 func main() {
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+	stderr := progress.NewLockedWriter(os.Stderr)
+
+	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}))
 
 	ollamaClient := llm.NewOllamaClient(llm.WithLogger(log))
 
 	cache := buildCache(log)
+	spinner := progress.NewWriter(stderr)
 
 	svc := service.New(nil, ollamaClient, cache, ollamaClient.Model(), log)
+	svc.Progress = spinner
+
 	app := cli.NewAppWithService(svc)
 	if err := app.Execute(); err != nil {
 		os.Exit(1)

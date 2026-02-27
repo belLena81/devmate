@@ -4,6 +4,7 @@ import (
 	"devmate/internal/domain"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -62,10 +63,10 @@ func TestBuildChunkPrompt_IndicatesPosition(t *testing.T) {
 }
 
 func TestDraftMessage_LargeDiff_UsesMapReduce(t *testing.T) {
-	callCount := 0
+	var callCount atomic.Int64
 	fake := &fakeLLM{
 		onGenerate: func(prompt string) {
-			callCount++
+			callCount.Add(1)
 		},
 		response: "feat: some change",
 	}
@@ -87,8 +88,8 @@ func TestDraftMessage_LargeDiff_UsesMapReduce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if callCount < 2 {
-		t.Errorf("expected multiple LLM calls for large diff, got %d", callCount)
+	if callCount.Load() < 2 {
+		t.Errorf("expected multiple LLM calls for large diff, got %d", callCount.Load())
 	}
 }
 

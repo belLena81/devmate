@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -22,16 +23,64 @@ func (f *fakeGit) LogBetween(base, head string) ([]string, error) {
 }
 
 type fakeLLM struct {
+	mu         sync.Mutex
 	response   string
 	err        error
 	onGenerate func(string)
 }
 
 func (f *fakeLLM) Generate(prompt string) (string, error) {
-	if f.onGenerate != nil {
-		f.onGenerate(prompt)
+	f.mu.Lock()
+	cb := f.onGenerate
+	f.mu.Unlock()
+
+	if cb != nil {
+		cb(prompt)
 	}
 	return f.response, f.err
+}
+
+// fakeProgress records all Status and Done calls for test assertions.
+// Thread-safe: goroutines in summarizeChunksParallel call Status concurrently.
+type fakeProgress struct {
+	mu       sync.Mutex
+	statuses []string
+	dones    []string
+}
+
+func (f *fakeProgress) Status(msg string) {
+	f.mu.Lock()
+	f.statuses = append(f.statuses, msg)
+	f.mu.Unlock()
+}
+
+func (f *fakeProgress) Done(msg string) {
+	f.mu.Lock()
+	f.dones = append(f.dones, msg)
+	f.mu.Unlock()
+}
+
+func (f *fakeProgress) statusCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.statuses)
+}
+
+func (f *fakeProgress) hasStatusContaining(sub string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range f.statuses {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func (f *fakeProgress) doneCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.dones)
 }
 
 func TestCommitService_DraftsMessage(t *testing.T) {
@@ -198,5 +247,123 @@ func TestCommitService_LLMError(t *testing.T) {
 	_, err := svc.DraftMessage(CommitOptions{})
 	if err == nil {
 		t.Fatal("expected error from LLM")
+	}
+}
+
+// ─── progress integration ───────────────────────────────────────────────────
+
+func TestDraftMessage_SingleShot_ReportsProgress(t *testing.T) {
+	fp := &fakeProgress{}
+	svc := Service{
+		Git:      &fakeGit{diff: "small diff"},
+		LLM:      &fakeLLM{response: "feat: thing"},
+		Log:      noopLogger(),
+		Progress: fp,
+	}
+	_, err := svc.DraftMessage(CommitOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fp.hasStatusContaining("Generating commit message") {
+		t.Error("expected progress status for single-shot commit")
+	}
+	if fp.doneCount() == 0 {
+		t.Error("expected Done to be called after completion")
+	}
+}
+
+func TestDraftMessage_MapReduce_ReportsChunkProgress(t *testing.T) {
+	var diff strings.Builder
+	for i := 0; i < 6; i++ {
+		diff.WriteString("diff --git a/f.go b/f.go\n")
+		diff.WriteString("+" + strings.Repeat("x", 200) + "\n")
+	}
+
+	fp := &fakeProgress{}
+	svc := Service{
+		Git:            &fakeGit{diff: diff.String()},
+		LLM:            &fakeLLM{response: "- bullet"},
+		Log:            noopLogger(),
+		Progress:       fp,
+		ChunkThreshold: 500,
+	}
+	_, err := svc.DraftMessage(CommitOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fp.hasStatusContaining("Summarizing chunk") {
+		t.Error("expected chunk summarization progress")
+	}
+	if !fp.hasStatusContaining("Synthesizing") {
+		t.Error("expected synthesis progress")
+	}
+	if fp.doneCount() == 0 {
+		t.Error("expected Done to be called")
+	}
+}
+
+func TestDraftBranchName_ReportsProgress(t *testing.T) {
+	fp := &fakeProgress{}
+	svc := Service{
+		LLM:      &fakeLLM{response: "feat/add-auth"},
+		Log:      noopLogger(),
+		Progress: fp,
+	}
+	_, err := svc.DraftBranchName(BranchOptions{Task: "add auth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fp.hasStatusContaining("Generating branch name") {
+		t.Error("expected branch name progress status")
+	}
+	if fp.doneCount() == 0 {
+		t.Error("expected Done to be called")
+	}
+}
+
+func TestDraftPrDescription_ReportsProgress(t *testing.T) {
+	fp := &fakeProgress{}
+	svc := Service{
+		Git:      &fakeGit{commits: []string{"feat: login"}},
+		LLM:      &fakeLLM{response: "PR desc"},
+		Log:      noopLogger(),
+		Progress: fp,
+	}
+	_, err := svc.DraftPrDescription(PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fp.hasStatusContaining("Generating PR description") {
+		t.Error("expected PR description progress status")
+	}
+	if fp.doneCount() == 0 {
+		t.Error("expected Done to be called")
+	}
+}
+
+func TestDraftMessage_LLMError_StillCallsDone(t *testing.T) {
+	fp := &fakeProgress{}
+	svc := Service{
+		Git:      &fakeGit{diff: "diff"},
+		LLM:      &fakeLLM{err: errors.New("fail")},
+		Log:      noopLogger(),
+		Progress: fp,
+	}
+	svc.DraftMessage(CommitOptions{})
+	if fp.doneCount() == 0 {
+		t.Error("expected Done to be called even on error (to clear the spinner)")
+	}
+}
+
+func TestDraftMessage_NilProgress_DoesNotPanic(t *testing.T) {
+	// Progress is nil — the progress() accessor should return NoopProgress.
+	svc := Service{
+		Git: &fakeGit{diff: "diff"},
+		LLM: &fakeLLM{response: "msg"},
+		Log: noopLogger(),
+	}
+	_, err := svc.DraftMessage(CommitOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

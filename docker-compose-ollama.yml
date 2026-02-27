@@ -6,6 +6,43 @@ services:
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
+    environment:
+      # ── Concurrency ──────────────────────────────────────────────────────────
+      # Match OLLAMA_NUM_PARALLEL to devmate's MaxConcurrency=2.
+      # Ollama time-slices the two requests rather than queueing them.
+      - OLLAMA_NUM_PARALLEL=2
+
+      # ── Threads ──────────────────────────────────────────────────────────────
+      # Ollama defaults to 8 threads regardless of CPU count.
+      # Your CPU has AVX512/VNNI — set this to your physical core count
+      # (not hyperthreads). For a 16-core machine: 16. For 8-core: 8.
+      # Rule of thumb: physical cores, not logical (lscpu | grep "Core(s) per socket").
+      # Start with physical cores; drop by 2 if you see thermal throttling.
+      - OLLAMA_NUM_THREAD=16
+
+      # ── Memory: Flash Attention ───────────────────────────────────────────────
+      # Reduces KV-cache memory footprint. Free win on CPU inference.
+      - OLLAMA_FLASH_ATTENTION=1
+
+      # ── Memory: KV cache quantization ────────────────────────────────────────
+      # Halves KV-cache RAM with negligible quality loss at typical context sizes.
+      - OLLAMA_KV_CACHE_TYPE=q8_0
+
+      # ── Context window ───────────────────────────────────────────────────────
+      # devmate chunk prompts are ~3300 tokens. 4096 is sufficient.
+      # Ollama multiplies this by NUM_PARALLEL internally (2×4096 = 8192 total),
+      # which matches what the runner log reports: n_ctx=8192, n_ctx_seq=4096.
+      - OLLAMA_CONTEXT_LENGTH=4096
+
+      # ── Model keep-alive ─────────────────────────────────────────────────────
+      # Keep the model warm between devmate invocations.
+      # The 13 failures in the Ollama log happened because requests arrived
+      # 1 second before the model finished loading. A longer keep-alive means
+      # the model stays resident and subsequent runs never hit cold-start races.
+      - OLLAMA_KEEP_ALIVE=15m
+
+      # ── Load timeout ─────────────────────────────────────────────────────────
+      - OLLAMA_LOAD_TIMEOUT=10m
 
 volumes:
   ollama_data:

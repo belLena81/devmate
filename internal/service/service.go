@@ -1,20 +1,26 @@
 package service
 
 import (
+	"context"
 	"devmate/internal/domain"
 	"fmt"
 	"io"
 	"log/slog"
+	"runtime"
+	"sync"
+	"sync/atomic"
 )
 
 // Service orchestrates git data retrieval, caching, and LLM generation.
 type Service struct {
 	Git            domain.GitClient
 	LLM            domain.LLM
-	Cache          Cache  // optional — nil is safe, treated as NoopCache
-	Model          string // included in cache keys to isolate responses per model
+	Cache          Cache           // optional — nil is safe, treated as NoopCache
+	Progress       domain.Progress // optional — nil is safe, treated as NoopProgress
+	Model          string          // included in cache keys to isolate responses per model
 	Log            *slog.Logger
 	ChunkThreshold int
+	MaxConcurrency int // max parallel LLM calls; 0 or negative means runtime.NumCPU()
 }
 
 func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *slog.Logger) *Service {
@@ -25,7 +31,24 @@ func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *s
 		Model:          model,
 		Log:            log.With("component", "service"),
 		ChunkThreshold: DefaultChunkThreshold,
+		MaxConcurrency: 2, // Ollama processes serially; 2 keeps a request queued ahead, any more just adds timeout pressure
 	}
+}
+
+// concurrency returns the effective concurrency limit.
+func (s *Service) concurrency() int {
+	if s.MaxConcurrency > 0 {
+		return s.MaxConcurrency
+	}
+	return runtime.NumCPU()
+}
+
+// progress returns the configured Progress, or NoopProgress when nil.
+func (s *Service) progress() domain.Progress {
+	if s.Progress == nil {
+		return domain.NoopProgress{}
+	}
+	return s.Progress
 }
 
 // cache returns the configured Cache, or NoopCache when nil.
@@ -70,37 +93,20 @@ func (s *Service) mapReduce(diff string, options CommitOptions) (string, error) 
 		"threshold", s.ChunkThreshold,
 	)
 
-	summaries := make([]string, 0, len(chunks))
-	for i, chunk := range chunks {
-		s.log().Debug("summarizing chunk",
-			"chunk", i+1,
-			"of", len(chunks),
-			"files", chunk.Files,
-			"bytes", len(chunk.Content),
-		)
-
-		prompt := BuildChunkPrompt(chunk.Content, i+1, len(chunks))
-		summary, err := s.LLM.Generate(prompt)
-		if err != nil {
-			return "", fmt.Errorf("summarizing chunk %d: %w", i+1, err)
-		}
-
-		s.log().Debug("chunk summary received",
-			"chunk", i+1,
-			"files", chunk.Files,
-			"summary", summary,
-		)
-
-		summaries = append(summaries, summary)
+	// Map phase: summarize all chunks in parallel.
+	summaries, err := s.summarizeChunksParallel(chunks)
+	if err != nil {
+		return "", err
 	}
 
 	// Hierarchically reduce summaries until they fit within the threshold.
-	summaries, err := s.reduceSummaries(summaries)
+	summaries, err = s.reduceSummaries(summaries)
 	if err != nil {
 		return "", err
 	}
 
 	s.log().Debug("synthesizing", "summaries", summaries)
+	s.progress().Status("Synthesizing commit message...")
 
 	prompt := BuildSynthesisPrompt(summaries, options.Type, options.Mode, options.Explain)
 	result, err := s.LLM.Generate(prompt)
@@ -112,12 +118,83 @@ func (s *Service) mapReduce(diff string, options CommitOptions) (string, error) 
 	return result, nil
 }
 
+// summarizeChunksParallel sends all chunk prompts to the LLM concurrently
+// (up to s.concurrency() at a time) and returns the summaries in their
+// original order. It returns the first error encountered (if any).
+func (s *Service) summarizeChunksParallel(chunks []Chunk) ([]string, error) {
+	n := len(chunks)
+	summaries := make([]string, n)
+	sem := make(chan struct{}, s.concurrency())
+	var completed atomic.Int64
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
+
+	s.progress().Status(fmt.Sprintf("Summarizing chunk 0/%d...", n))
+
+	wg.Add(n)
+	for i, chunk := range chunks {
+		go func(idx int, ch Chunk) {
+			defer wg.Done()
+
+			// Abort before acquiring a slot if a sibling already failed.
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				return
+			}
+			defer func() { <-sem }()
+
+			s.log().Debug("summarizing chunk",
+				"chunk", idx+1,
+				"of", n,
+				"files", ch.Files,
+				"bytes", len(ch.Content),
+			)
+
+			prompt := BuildChunkPrompt(ch.Content, idx+1, n)
+			summary, err := s.LLM.Generate(prompt)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("summarizing chunk %d: %w", idx+1, err)
+					cancel() // signal all waiting goroutines to stop
+				}
+				mu.Unlock()
+				return
+			}
+
+			done := completed.Add(1)
+			s.progress().Status(fmt.Sprintf("Summarizing chunk %d/%d...", done, n))
+
+			s.log().Debug("chunk summary received",
+				"chunk", idx+1,
+				"files", ch.Files,
+				"summary", summary,
+			)
+
+			summaries[idx] = summary
+		}(i, chunk)
+	}
+
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return summaries, nil
+}
+
 // reduceSummaries iteratively condenses summaries in groups until their
 // combined size fits within ChunkThreshold. Each iteration packs summaries
-// into groups that fit the threshold, sends each group to the LLM for
-// condensation, and replaces the list with the condensed results.
-// This guarantees the final synthesis prompt stays within model limits
-// regardless of how many chunks the original diff produced.
+// into groups that fit the threshold, sends each group to the LLM in parallel
+// for condensation, and replaces the list with the condensed results.
 func (s *Service) reduceSummaries(summaries []string) ([]string, error) {
 	for {
 		total := summariesSize(summaries)
@@ -132,27 +209,66 @@ func (s *Service) reduceSummaries(summaries []string) ([]string, error) {
 		)
 
 		groups := groupSummaries(summaries, s.ChunkThreshold)
-		reduced := make([]string, 0, len(groups))
+		reduced := make([]string, len(groups))
+		sem := make(chan struct{}, s.concurrency())
+		var reduceCompleted atomic.Int64
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		s.progress().Status(fmt.Sprintf("Reducing summaries: group 0/%d...", len(groups)))
+
+		var (
+			wg       sync.WaitGroup
+			mu       sync.Mutex
+			firstErr error
+		)
 
 		for i, group := range groups {
 			// Single-item groups don't need an LLM call — pass through.
 			if len(group) == 1 {
-				reduced = append(reduced, group[0])
+				reduced[i] = group[0]
 				continue
 			}
 
-			s.log().Debug("reducing summary group",
-				"group", i+1,
-				"of", len(groups),
-				"items", len(group),
-			)
+			wg.Add(1)
+			go func(idx int, grp []string) {
+				defer wg.Done()
 
-			prompt := BuildReducePrompt(group)
-			condensed, err := s.LLM.Generate(prompt)
-			if err != nil {
-				return nil, fmt.Errorf("reducing summary group %d: %w", i+1, err)
-			}
-			reduced = append(reduced, condensed)
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
+				defer func() { <-sem }()
+
+				s.log().Debug("reducing summary group",
+					"group", idx+1,
+					"of", len(groups),
+					"items", len(grp),
+				)
+
+				prompt := BuildReducePrompt(grp)
+				condensed, err := s.LLM.Generate(prompt)
+				if err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = fmt.Errorf("reducing summary group %d: %w", idx+1, err)
+						cancel()
+					}
+					mu.Unlock()
+					return
+				}
+				done := reduceCompleted.Add(1)
+				s.progress().Status(fmt.Sprintf("Reducing summaries: group %d/%d...", done, len(groups)))
+				reduced[idx] = condensed
+			}(i, group)
+		}
+
+		wg.Wait()
+
+		if firstErr != nil {
+			return nil, firstErr
 		}
 
 		// Safety: if reduction made no progress, stop to avoid infinite loop.
@@ -235,10 +351,12 @@ func (s *Service) DraftMessage(o CommitOptions) (string, error) {
 		)
 		result, err = s.mapReduce(diff, o)
 	} else {
+		s.progress().Status("Generating commit message...")
 		prompt := BuildCommitPrompt(diff, o)
 		result, err = s.LLM.Generate(prompt)
 	}
 	if err != nil {
+		s.progress().Done("")
 		s.log().Error("LLM generation failed", "error", err)
 		return "", err
 	}
@@ -248,6 +366,7 @@ func (s *Service) DraftMessage(o CommitOptions) (string, error) {
 		s.log().Debug("failed to write cache entry", "error", err)
 	}
 
+	s.progress().Done("")
 	s.log().Debug("message drafted successfully")
 	return result, nil
 }
@@ -263,9 +382,11 @@ func (s *Service) DraftBranchName(o BranchOptions) (string, error) {
 		return hit, nil
 	}
 
+	s.progress().Status("Generating branch name...")
 	prompt := BuildBranchPrompt(o)
 	result, err := s.LLM.Generate(prompt)
 	if err != nil {
+		s.progress().Done("")
 		s.log().Error("LLM generation failed", "error", err)
 		return "", err
 	}
@@ -275,6 +396,7 @@ func (s *Service) DraftBranchName(o BranchOptions) (string, error) {
 		s.log().Debug("failed to write cache entry", "error", err)
 	}
 
+	s.progress().Done("")
 	s.log().Debug("branch name drafted successfully")
 	return result, nil
 }
@@ -303,9 +425,11 @@ func (s *Service) DraftPrDescription(o PrOptions) (string, error) {
 		return hit, nil
 	}
 
+	s.progress().Status("Generating PR description...")
 	prompt := BuildPrPrompt(commits, o)
 	result, err := s.LLM.Generate(prompt)
 	if err != nil {
+		s.progress().Done("")
 		s.log().Error("LLM generation failed", "error", err)
 		return "", err
 	}
@@ -315,6 +439,7 @@ func (s *Service) DraftPrDescription(o PrOptions) (string, error) {
 		s.log().Debug("failed to write cache entry", "error", err)
 	}
 
+	s.progress().Done("")
 	s.log().Debug("pr description drafted successfully")
 	return result, nil
 }
