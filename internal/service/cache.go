@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Cache is a simple key-value store for LLM responses.
@@ -103,19 +104,19 @@ var (
 
 // commitCacheKey builds the cache key for a DraftMessage call.
 // Inputs: model, raw diff, type override, mode, explain flag.
-func commitCacheKey(model, diff, typeStr, modeStr string, explain bool) string {
-	return buildCacheKey(commitTmplHash, model, diff, typeStr, modeStr, boolStr(explain))
+func commitCacheKey(model, binaryHash, diff, typeStr, modeStr string, explain bool) string {
+	return buildCacheKey(commitTmplHash, model, binaryHash, diff, typeStr, modeStr, boolStr(explain))
 }
 
 // branchCacheKey builds the cache key for a DraftBranchName call.
 // Inputs: model, task description, type override, mode, explain flag.
-func branchCacheKey(model, task, typeStr, modeStr string, explain bool) string {
-	return buildCacheKey(branchTmplHash, model, task, typeStr, modeStr, boolStr(explain))
+func branchCacheKey(model, binaryHash, task, typeStr, modeStr string, explain bool) string {
+	return buildCacheKey(branchTmplHash, model, binaryHash, task, typeStr, modeStr, boolStr(explain))
 }
 
 // prCacheKey builds the cache key for a DraftPrDescription call.
 // Inputs: model, commit messages (joined), type override, mode, explain flag.
-func prCacheKey(model string, commits []string, typeStr, modeStr string, explain bool) string {
+func prCacheKey(model, binaryHash string, commits []string, typeStr, modeStr string, explain bool) string {
 	return buildCacheKey(prTmplHash, model, strings.Join(commits, "\n"), typeStr, modeStr, boolStr(explain))
 }
 
@@ -125,3 +126,34 @@ func boolStr(b bool) string {
 	}
 	return "false"
 }
+
+// BinaryHash returns a hex SHA256 of the running executable. It is computed
+// once and cached. If the executable cannot be read (e.g. in tests using a
+// fake path) it returns an empty string, which is safe — it simply means the
+// binary version is not included in the cache key for that run.
+func BinaryHash() string {
+	return binaryHashOnce()
+}
+
+var binaryHashOnce = sync.OnceValue(func() string {
+	path, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	// Resolve symlinks so `go install`-style updates are detected correctly.
+	path, err = filepath.EvalSymlinks(path)
+	if err != nil {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(h.Sum(nil))
+})

@@ -20,7 +20,8 @@ type Service struct {
 	Model          string          // included in cache keys to isolate responses per model
 	Log            *slog.Logger
 	ChunkThreshold int
-	MaxConcurrency int // max parallel LLM calls; 0 or negative means runtime.NumCPU()
+	MaxConcurrency int    // max parallel LLM calls; 0 or negative means runtime.NumCPU()
+	BinaryHash     string // included in cache keys so a new binary never serves stale entries
 }
 
 func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *slog.Logger) *Service {
@@ -31,7 +32,8 @@ func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *s
 		Model:          model,
 		Log:            log.With("component", "service"),
 		ChunkThreshold: DefaultChunkThreshold,
-		MaxConcurrency: 2, // Ollama processes serially; 2 keeps a request queued ahead, any more just adds timeout pressure
+		MaxConcurrency: 2,
+		BinaryHash:     BinaryHash(),
 	}
 }
 
@@ -127,6 +129,8 @@ func (s *Service) summarizeChunksParallel(chunks []Chunk) ([]string, error) {
 	sem := make(chan struct{}, s.concurrency())
 	var completed atomic.Int64
 
+	// ctx is cancelled as soon as any chunk fails so remaining goroutines
+	// waiting on the semaphore abort instead of sending more requests to Ollama.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -337,7 +341,7 @@ func (s *Service) DraftMessage(o CommitOptions) (string, error) {
 	}
 	s.log().Debug("got diff", "bytes", len(diff))
 
-	key := commitCacheKey(s.Model, diff, typeStr, modeStr, o.Explain)
+	key := commitCacheKey(s.Model, s.BinaryHash, diff, typeStr, modeStr, o.Explain)
 	if hit, ok := s.cache().Get(key); ok {
 		s.log().Debug("commit message cache hit")
 		return hit, nil
@@ -376,7 +380,7 @@ func (s *Service) DraftBranchName(o BranchOptions) (string, error) {
 	modeStr := o.Mode.String()
 	s.log().Debug("drafting branch name", "task", o.Task, "type", typeStr, "mode", modeStr)
 
-	key := branchCacheKey(s.Model, o.Task, typeStr, modeStr, o.Explain)
+	key := branchCacheKey(s.Model, s.BinaryHash, o.Task, typeStr, modeStr, o.Explain)
 	if hit, ok := s.cache().Get(key); ok {
 		s.log().Debug("branch name cache hit")
 		return hit, nil
@@ -419,7 +423,7 @@ func (s *Service) DraftPrDescription(o PrOptions) (string, error) {
 		return "", domain.ErrEmptyPR
 	}
 
-	key := prCacheKey(s.Model, commits, typeStr, modeStr, o.Explain)
+	key := prCacheKey(s.Model, s.BinaryHash, commits, typeStr, modeStr, o.Explain)
 	if hit, ok := s.cache().Get(key); ok {
 		s.log().Debug("pr description cache hit")
 		return hit, nil
