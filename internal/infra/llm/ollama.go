@@ -12,7 +12,7 @@ import (
 
 const (
 	defaultBaseURL = "http://localhost:11434"
-	defaultModel   = "llama3.2"
+	defaultModel   = "llama3.2:3b"
 	generatePath   = "/api/generate"
 	requestTimeout = 120 * time.Second
 )

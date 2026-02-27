@@ -17,6 +17,12 @@ var branchTmpl string
 //go:embed _resources/pr.tmpl
 var prTmpl string
 
+//go:embed _resources/chunk.tmpl
+var chunkTmpl string
+
+//go:embed _resources/synthesis.tmpl
+var synthesisTmpl string
+
 // commitData holds the values injected into commit.tmpl.
 type commitData struct {
 	TypeOverride string // empty when type is auto-detected
@@ -41,6 +47,28 @@ type prData struct {
 	SourceBranch      string
 	DestinationBranch string
 	Commits           []string
+}
+
+// chunkData holds the values injected into chunk.tmpl.
+type chunkData struct {
+	Chunk int
+	Total int
+	Diff  string
+}
+
+// numberedSummary is one entry in the synthesis summaries list.
+// Carrying the number as a field avoids needing a custom template func.
+type numberedSummary struct {
+	N    int
+	Text string
+}
+
+// synthesisData holds the values injected into synthesis.tmpl.
+type synthesisData struct {
+	TypeOverride string
+	Detailed     bool
+	Explain      bool
+	Summaries    []numberedSummary
 }
 
 func BuildCommitPrompt(diff string, o CommitOptions) string {
@@ -72,6 +100,34 @@ func BuildPrPrompt(commits []string, o PrOptions) string {
 		SourceBranch:      o.SourceBranch,
 		DestinationBranch: o.DestinationBranch,
 		Commits:           commits,
+	})
+}
+
+// BuildChunkPrompt builds the map-step prompt for summarising one chunk of a
+// large diff. chunk and total tell the model it is seeing a partial view.
+func BuildChunkPrompt(diff string, chunk, total int) string {
+	return mustRender("chunk", chunkTmpl, chunkData{
+		Chunk: chunk,
+		Total: total,
+		Diff:  diff,
+	})
+}
+
+// BuildSynthesisPrompt builds the reduce-step prompt that turns per-chunk
+// bullet summaries into a single conventional commit message.
+func BuildSynthesisPrompt(summaries []string, cmdType domain.CmdType, mode domain.CmdMode, explain bool) string {
+	typeStr, _ := cmdType.String()
+
+	numbered := make([]numberedSummary, len(summaries))
+	for i, s := range summaries {
+		numbered[i] = numberedSummary{N: i + 1, Text: s}
+	}
+
+	return mustRender("synthesis", synthesisTmpl, synthesisData{
+		TypeOverride: typeStr,
+		Detailed:     mode == domain.Detailed,
+		Explain:      explain,
+		Summaries:    numbered,
 	})
 }
 

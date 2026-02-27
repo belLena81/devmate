@@ -247,6 +247,31 @@ func TestLogBetween_ErrorOutsideGitRepo(t *testing.T) {
 	}
 }
 
+func TestDiffCached_WhitespaceOnlyChanges_ExcludedFromDiff(t *testing.T) {
+	// Stage a file, commit it, then re-stage the same content with only
+	// indentation changes. DiffCached must return empty because -w ignores
+	// all whitespace differences.
+	dir := newTestRepo(t)
+
+	// Commit the original file.
+	original := "package main\n\nfunc hello() {\n\treturn\n}\n"
+	stageFile(t, dir, "hello.go", original)
+	commitAll(t, dir, "initial")
+
+	// Re-write with spaces instead of tabs — whitespace-only change.
+	whitespaceOnly := "package main\n\nfunc hello() {\n    return\n}\n"
+	stageFile(t, dir, "hello.go", whitespaceOnly)
+
+	runner := git.New(dir, noopLogger())
+	diff, err := runner.DiffCached()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if diff != "" {
+		t.Errorf("expected empty diff for whitespace-only change, got:\n%s", diff)
+	}
+}
+
 // --- validRef (option injection guard) --------------------------------------
 
 func TestLogBetween_ErrorOnRefStartingWithDash(t *testing.T) {

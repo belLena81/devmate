@@ -150,8 +150,8 @@ func TestBuildBranchPrompt_WithTypeOverride_IncludesType(t *testing.T) {
 func TestBuildBranchPrompt_WithoutTypeOverride_AsksToDetect(t *testing.T) {
 	opts := BranchOptions{Task: "some task", Options: domain.Options{Type: domain.Undefined}}
 	p := strings.ToLower(BuildBranchPrompt(opts))
-	if !strings.Contains(p, "detect") && !strings.Contains(p, "infer") && !strings.Contains(p, "determine") {
-		t.Errorf("expected prompt to ask LLM to detect type, got:\n%s", p)
+	if !strings.Contains(p, "detect") && !strings.Contains(p, "infer") && !strings.Contains(p, "determine") && !strings.Contains(p, "choose") {
+		t.Errorf("expected prompt to ask LLM to choose/detect type, got:\n%s", p)
 	}
 }
 

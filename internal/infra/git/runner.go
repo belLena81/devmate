@@ -33,11 +33,14 @@ func RepoRoot() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// DiffCached returns the output of `git diff --cached` — the staged diff.
-// Returns an empty string (and no error) when nothing is staged.
+// DiffCached returns the staged diff, ignoring whitespace-only changes.
+// -w (--ignore-all-space) tells git to omit hunks whose only differences are
+// spaces, tabs, or indentation shifts. This prevents alignment-only reformats
+// from inflating the diff and consuming LLM context.
+// Returns an empty string (and no error) when nothing of substance is staged.
 func (r *Runner) DiffCached() (string, error) {
 	r.log.Debug("running diff --cached")
-	out, err := r.run("diff", "--cached")
+	out, err := r.run("diff", "--cached", "-w")
 	if err != nil {
 		r.log.Error("diff --cached failed", "error", err)
 		return "", err
