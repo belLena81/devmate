@@ -26,6 +26,9 @@ var synthesisTmpl string
 //go:embed _resources/reduce.tmpl
 var reduceTmpl string
 
+//go:embed _resources/pr_synthesis.tmpl
+var prSynthesisTmpl string
+
 // commitData holds the values injected into commit.tmpl.
 type commitData struct {
 	TypeOverride string // empty when type is auto-detected
@@ -145,6 +148,36 @@ func BuildReducePrompt(summaries []string) string {
 
 	return mustRender("reduce", reduceTmpl, synthesisData{
 		Summaries: numbered,
+	})
+}
+
+// prSynthesisData holds the values injected into pr_synthesis.tmpl.
+type prSynthesisData struct {
+	TypeOverride      string
+	Detailed          bool
+	Explain           bool
+	SourceBranch      string
+	DestinationBranch string
+	Summaries         []numberedSummary
+}
+
+// BuildPrSynthesisPrompt builds the reduce-step prompt that turns per-chunk
+// commit summaries into a single PR title and description.
+func BuildPrSynthesisPrompt(summaries []string, o PrOptions) string {
+	typeStr, _ := o.Type.String()
+
+	numbered := make([]numberedSummary, len(summaries))
+	for i, s := range summaries {
+		numbered[i] = numberedSummary{N: i + 1, Text: s}
+	}
+
+	return mustRender("pr_synthesis", prSynthesisTmpl, prSynthesisData{
+		TypeOverride:      typeStr,
+		Detailed:          o.Mode == domain.Detailed,
+		Explain:           o.Explain,
+		SourceBranch:      o.SourceBranch,
+		DestinationBranch: o.DestinationBranch,
+		Summaries:         numbered,
 	})
 }
 

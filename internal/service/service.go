@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -22,6 +23,7 @@ type Service struct {
 	ChunkThreshold int
 	MaxConcurrency int    // max parallel LLM calls; 0 or negative means runtime.NumCPU()
 	BinaryHash     string // included in cache keys so a new binary never serves stale entries
+	MaxRetries     int    // service-level retry attempts for transient LLM errors; 0 means no retry
 }
 
 func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *slog.Logger) *Service {
@@ -71,6 +73,30 @@ func (s *Service) log() *slog.Logger {
 	return s.Log
 }
 
+// generateWithRetry calls s.LLM.Generate and retries up to s.MaxRetries times
+// on failure. Retry 0 means a single attempt with no retries.
+// All calls share the same prompt — this is a pure service-level safety net
+// on top of any HTTP-level retry already present in the LLM client.
+func (s *Service) generateWithRetry(prompt string) (string, error) {
+	var lastErr error
+	attempts := s.MaxRetries + 1
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			s.log().Debug("retrying LLM generate",
+				"attempt", i+1,
+				"of", attempts,
+				"last_error", lastErr,
+			)
+		}
+		result, err := s.LLM.Generate(prompt)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+	}
+	return "", fmt.Errorf("LLM generate failed after %d attempt(s): %w", attempts, lastErr)
+}
+
 type CommitOptions struct {
 	domain.Options
 }
@@ -84,6 +110,41 @@ type PrOptions struct {
 	SourceBranch      string
 	DestinationBranch string
 	domain.Options
+}
+
+func (s *Service) mapReducePr(commits []string, options PrOptions) (string, error) {
+	joined := strings.Join(commits, "\n")
+	chunks := PackChunks(joined, s.ChunkThreshold)
+
+	s.log().Debug("starting PR map-reduce",
+		"total_bytes", len(joined),
+		"chunks", len(chunks),
+		"threshold", s.ChunkThreshold,
+	)
+
+	// Map phase: summarize each chunk of commits in parallel.
+	summaries, err := s.summarizeChunksParallel(chunks)
+	if err != nil {
+		return "", err
+	}
+
+	// Hierarchically reduce summaries until they fit within the threshold.
+	summaries, err = s.reduceSummaries(summaries)
+	if err != nil {
+		return "", err
+	}
+
+	s.log().Debug("synthesizing PR description", "summaries", summaries)
+	s.progress().Status("Synthesizing PR description...")
+
+	prompt := BuildPrSynthesisPrompt(summaries, options)
+	result, err := s.generateWithRetry(prompt)
+	if err != nil {
+		return "", err
+	}
+
+	s.log().Debug("PR synthesis complete", "result", result)
+	return sanitize(result), nil
 }
 
 func (s *Service) mapReduce(diff string, options CommitOptions) (string, error) {
@@ -111,7 +172,7 @@ func (s *Service) mapReduce(diff string, options CommitOptions) (string, error) 
 	s.progress().Status("Synthesizing commit message...")
 
 	prompt := BuildSynthesisPrompt(summaries, options.Type, options.Mode, options.Explain)
-	result, err := s.LLM.Generate(prompt)
+	result, err := s.generateWithRetry(prompt)
 	if err != nil {
 		return "", err
 	}
@@ -163,7 +224,7 @@ func (s *Service) summarizeChunksParallel(chunks []Chunk) ([]string, error) {
 			)
 
 			prompt := BuildChunkPrompt(ch.Content, idx+1, n)
-			summary, err := s.LLM.Generate(prompt)
+			summary, err := s.generateWithRetry(prompt)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -253,7 +314,7 @@ func (s *Service) reduceSummaries(summaries []string) ([]string, error) {
 				)
 
 				prompt := BuildReducePrompt(grp)
-				condensed, err := s.LLM.Generate(prompt)
+				condensed, err := s.generateWithRetry(prompt)
 				if err != nil {
 					mu.Lock()
 					if firstErr == nil {
@@ -357,7 +418,7 @@ func (s *Service) DraftMessage(o CommitOptions) (string, error) {
 	} else {
 		s.progress().Status("Generating commit message...")
 		prompt := BuildCommitPrompt(diff, o)
-		result, err = s.LLM.Generate(prompt)
+		result, err = s.generateWithRetry(prompt)
 	}
 	if err != nil {
 		s.progress().Done("")
@@ -388,7 +449,7 @@ func (s *Service) DraftBranchName(o BranchOptions) (string, error) {
 
 	s.progress().Status("Generating branch name...")
 	prompt := BuildBranchPrompt(o)
-	result, err := s.LLM.Generate(prompt)
+	result, err := s.generateWithRetry(prompt)
 	if err != nil {
 		s.progress().Done("")
 		s.log().Error("LLM generation failed", "error", err)
@@ -429,16 +490,29 @@ func (s *Service) DraftPrDescription(o PrOptions) (string, error) {
 		return hit, nil
 	}
 
-	s.progress().Status("Generating PR description...")
-	prompt := BuildPrPrompt(commits, o)
-	result, err := s.LLM.Generate(prompt)
+	var result string
+	joinedCommits := strings.Join(commits, "\n")
+	if s.ChunkThreshold > 0 && len(joinedCommits) > s.ChunkThreshold {
+		s.log().Debug("commits exceeds threshold, using map-reduce",
+			"commits_bytes", len(joinedCommits),
+			"threshold", s.ChunkThreshold,
+		)
+		result, err = s.mapReducePr(commits, o)
+	} else {
+		s.progress().Status("Generating PR description...")
+		prompt := BuildPrPrompt(commits, o)
+		result, err = s.generateWithRetry(prompt)
+		if err == nil {
+			result = sanitize(result)
+		}
+	}
+
 	if err != nil {
 		s.progress().Done("")
 		s.log().Error("LLM generation failed", "error", err)
 		return "", err
 	}
 
-	result = sanitize(result)
 	if err := s.cache().Set(key, result); err != nil {
 		s.log().Debug("failed to write cache entry", "error", err)
 	}

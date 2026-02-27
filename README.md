@@ -2,107 +2,204 @@
 
 Devmate is a local-first CLI assistant that helps developers automate common Git workflows by drafting content — never executing it.
 
-It analyzes repository state and produces human-reviewed text output for:
- - Conventional commit messages
- - Clean, team-standard branch names
- - Detailed Pull Request descriptions
+It analyzes repository state and produces human-reviewed text suggestions for:
+- Conventional commit messages
+- Clean, team-standard branch names
+- Structured Pull Request descriptions
 
-Devmate is designed for private and sensitive repositories where security, privacy, and developer intent are non-negotiable.
+Devmate never executes Git mutations and never applies AI output automatically.
+
+It is a drafting tool — not an autonomous agent.
 
 ## Design Principles
 
-### Read-Only by Default
+### 1. Read-Only Git Access
 
-Devmate never runs git commit, git push, git checkout, or any mutating Git command.
-All Git interactions are strictly informational.
+All Git interactions are informational only:
+- git diff --cached
+- commit history
 
-### Text-Only Output
+No mutating commands are ever executed.
 
-All output is plain text written to stdout.
-Nothing is piped to a shell, executed, or used to trigger logic.
+### 2. Text In → Text Out
 
-### Offline & Private
+The LLM layer:
+- Accepts structured prompts
+- Returns raw text
+- Has no system-level authority
+- Cannot trigger execution
 
-- Fully functional without an internet connection
-- Supports Ollama for 100% local LLM execution
-- No telemetry, no external APIs by default
+All AI output is treated as untrusted suggestions.
 
-### Untrusted AI Output
+### 3. Local-First by Default
 
-AI responses are treated as raw suggestions.
-Human review is always required before use.
+- Works fully offline
+- Supports Ollama for local model execution
+- No telemetry
+- No external APIs required
+
+### 4. Clean Architecture Enforcement
+
+Devmate strictly separates concerns to prevent accidental privilege escalation.
+
+```
+cmd/devmate/          CLI entrypoint
+internal/
+  cli/                Cobra commands & UX
+  domain/             Core interfaces
+  service/            Orchestration & AI pipeline
+  infra/
+    git/              Git runner (read-only)
+    llm/              LLM adapters (Ollama)
+    progress/         Spinner / CLI feedback
+```
+
+Dependency Direction
+```
+CLI → Service → Domain Interfaces ← Infrastructure
+```
+Infrastructure never leaks into business logic.
 
 ## Supported Commands
-1. devmate commit
-Analyzes staged changes (git diff --cached) and drafts a conventional commit message.
+### 1. devmate commit
+   Analyzes staged changes and drafts a Conventional Commit message.
    `devmate commit`
+   
+Uses:
+- git diff --cached
+- Chunking + reduction pipeline (for large diffs)
+- Commit prompt template
 
-####    Output example:
+Example output:
+```
 feat(auth): add token refresh mechanism
 
 - Introduces refresh token rotation
 - Updates middleware validation logic
 - Adds unit tests for expiration edge cases
-
-2. devmate branch
-Analyzes the current branch name and drafts a team-standard branch name.
+```
+### 2. devmate branch
+Drafts a clean branch name from a description.
    `devmate branch "Add retry logic to payment webhook handler"`
-####    Output example:
+Example:
+```
 add/retry-logic-to-payment-webhook-handler
+```
+Uses a branch-specific prompt template.
 
-3. devmate pr
-Analyzes the current branch and drafts a detailed Pull Request description.
+### 3. devmate pr
+Drafts a structured Pull Request description.
    `devmate pr --base main --head feat/payment-webhook-retry`
-   Output includes:
-- Summary of changes
-- Key technical decisions
-- Impact and risk notes
+Output includes:
+- Summary
+- Technical decisions
+- Risk & impact notes
 
-## Non-Goals
+## AI Processing Pipeline
 
-Devmate intentionally does not:
-- Execute Git mutations
-- Auto-apply changes
-- Manage credentials
-- Interact with remote Git providers
-- Run AI-generated commands
+Devmate implements a multi-stage LLM pipeline to safely handle large diffs.
 
-This is a drafting tool, not an agent with authority.
+### 1. Chunking
 
-## Architecture Overview
+Large diffs are split into manageable chunks.
 
-Devmate follows a Clean Architecture approach to enforce safety and maintainability.
+### 2. Per-Chunk Analysis
 
-```
-cmd/            CLI entrypoint
-internal/
-cli/          Cobra commands and UX
-app/          Use-case orchestration
-domain/       Core interfaces and prompts
-infra/        Git and LLM implementations
-```
+Each chunk is analyzed independently using
+- chunk.tmpl
 
-### Key Boundaries
+### 3. Reduction
 
-- Git access is isolated and read-only
-- AI logic is pure text-in / text-out
-- CLI owns all user interaction
+Chunk summaries are merged via:
+- reduce.tmpl
 
-### LLM Support
+### 4. Synthesis
 
-Devmate currently supports:
+Final structured output is produced using:
+- synthesis.tmpl
+- Command-specific templates (commit.tmpl, pr.tmpl, branch.tmpl)
+
+This staged approach:
+- Prevents context overflow
+- Improves signal quality 
+- Maintains deterministic structure
+
+## Caching Layer
+
+Devmate includes a service-level caching mechanism to:
+- Avoid re-analyzing identical diffs 
+- Improve performance
+- Reduce redundant LLM calls
+Cache keys are derived from structured input state, not arbitrary text.
+
+Caching is internal and does not persist sensitive repository content outside process scope.
+
+## Templates
+
+All prompts are template-driven and stored in:
+```internal/service/_resources/```
+This allows:
+- Deterministic prompt structure
+- Easy customization
+- Clear separation of prompt logic from business logic
+
+Templates include:
+- branch.tmpl
+- commit.tmpl
+- pr.tmpl
+- chunk.tmpl
+- reduce.tmpl
+- synthesis.tmpl
+
+## Progress Feedback
+
+A lightweight spinner system provides CLI feedback during LLM processing.
+
+This:
+- Improves UX during long operations
+- Does not alter program logic
+- Lives in infra/progress
+
+## LLM Support
+
+Currently supported:
 - Ollama (local models)
 
-LLM integration is adapter-based and can be extended without touching CLI or Git logic.
+Adapter-based design allows new providers without modifying:
+- CLI layer
+- Git layer
+- Service orchestration
+LLM interface lives in internal/domain/llm.go.
+
+## Configuration
+
+Configuration file:
+```config/config.toml```
+Allows structured runtime configuration without hardcoding model or environment decisions.
+
+## Docker Support
+
+The repository includes:
+- Dockerfile
+- docker-compose-ollama.yml
+These allow:
+- Running Devmate in containerized environments
+- Spinning up Ollama locally for fully isolated development
 
 ## Installation
-go install github.com/belLena81/devmate/cmd/devmate@latest
+### From Source
+```
+git clone https://github.com/belLena81/devmate
+cd devmate
+go build ./cmd/devmate
+```
+### Install via Go
+```go install github.com/belLena81/devmate/cmd/devmate@latest```
 
-Requires:
-
-- Go 1.25+
-- Git
-- Ollama (optional, for AI features)
+## Requirements
+ - Go 1.25+
+ - Git
+ - Ollama
 
 ## Development
 
@@ -112,19 +209,48 @@ cd devmate
 go build ./cmd/devmate
 ```
 
+## Testing
 
-## Code Style
+The project includes:
+- CLI tests
+- Service tests
+- Cache tests
+- Prompt tests
+- Chunking & reduction tests
+- Git runner tests
+- LLM adapter tests
 
-- Small, explicit interfaces
+Testing strategy enforces:
 - No hidden side effects
-- No reflection or magic behavior
-- Dependency direction strictly enforced
+- Interface-based mocking
+- Deterministic service behavior
 
-## Security Considerations
+## Non-Goals
 
-- No network calls unless explicitly configured
+Devmate intentionally does not:
+- Execute Git mutations
+- Apply commits automatically
+- Push to remotes
+- Manage credentials
+- Run AI-generated commands
+- Modify files
+- Operate as an autonomous agent
+
+## Security Model
+
 - No shell execution of AI output
-- No file system writes outside temporary process scope
-- No background processes
+- No remote calls unless explicitly configured
+- No filesystem writes outside controlled scope
+- No background agents
+- No implicit authority escalation
+- AI suggestions are untrusted text.
 
-If Devmate suggests something dangerous, it’s because you asked it to think, not because it took action.
+You review. You decide.
+
+## Design Philosophy
+- Small explicit interfaces
+- No reflection
+- No magic behavior
+- Deterministic boundaries
+- Strict separation of concerns
+- The goal is controlled augmentation — not automation.

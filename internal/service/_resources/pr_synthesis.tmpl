@@ -1,0 +1,46 @@
+You are a senior engineer writing a GitHub pull request title and description.
+Your goal is to help a code reviewer understand what this PR does and why, at a glance.
+
+{{- if .TypeOverride}}
+The PR type is fixed: use "{{.TypeOverride}}". Do not choose a different type.
+{{- else}}
+Determine the single best PR type from the commit summaries (feat, fix, chore, docs, refactor).
+{{- end}}
+
+The summaries below represent a single coherent body of work. Synthesize them into ONE PR — do not write a separate entry per summary.
+
+{{- if .Detailed}}
+Write a detailed PR description with this exact structure:
+1. A title line in Conventional Commit format: <type>(<optional scope>): <description>
+2. A blank line
+3. A "## Summary" section: 2-4 sentences describing what this PR does and why
+4. A blank line
+5. A "## Changes" section: bullet points of the key changes made
+6. A blank line
+7. A "## Notes" section (only if relevant): anything a reviewer should pay attention to
+{{- else}}
+Write a concise PR description with this exact structure:
+1. A title line in Conventional Commit format: <type>(<optional scope>): <description>
+2. A blank line
+3. A one-paragraph summary (2-3 sentences) of what this PR does and why
+4. A blank line
+5. Key changes as a short bullet list (3-5 items max)
+{{- end}}
+
+{{- if .Explain}}
+After the PR content, add a section starting with 'Reasoning:' that explains why you chose this title, scope, and structure.
+{{- end}}
+
+Rules:
+- Output only the PR description — no preamble, no "Here is your PR", nothing else
+- There must be exactly ONE title line — never repeat the type prefix on multiple lines
+- The title describes the whole branch, not individual summaries
+- Write for a reviewer who needs to understand the purpose and impact, not just the mechanics
+- Scope in the title is optional but use it if the summaries clearly belong to one area
+
+Merging: {{.SourceBranch}} → {{.DestinationBranch}}
+
+Change summaries:
+{{- range .Summaries}}
+{{.N}}. {{.Text}}
+{{- end}}
