@@ -13,6 +13,20 @@ func newPrApp() *App {
 	return app
 }
 
+func TestPrCmd_NilService_ReturnsErrServiceNotInitialized(t *testing.T) {
+	app := &App{} // all services nil
+	app.rootCmd = buildRootCmd(app)
+	app.rootCmd.SetArgs([]string{"pr", "feature/x", "main"})
+
+	err := app.Execute()
+	if err == nil {
+		t.Fatal("expected error when prService is nil")
+	}
+	if !errors.Is(err, domain.ErrServiceNotInitialized) {
+		t.Errorf("expected ErrServiceNotInitialized, got %v", err)
+	}
+}
+
 func TestPrCmd_IsRegistered(t *testing.T) {
 	app := newPrApp()
 	cmd, _, err := app.rootCmd.Find([]string{"pr"})

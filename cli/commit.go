@@ -30,6 +30,9 @@ func newCommitCmd(a *App) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if a.commitService == nil {
+			return domain.ErrServiceNotInitialized
+		}
 		msg, err := a.commitService.DraftMessage(cmd.Context(), commitOpts)
 		if err != nil {
 			return err

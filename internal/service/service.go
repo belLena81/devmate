@@ -110,8 +110,60 @@ type Service struct {
 
 const defaultRetryBaseDelay = 2 * time.Second
 
-func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *slog.Logger) *Service {
-	return &Service{
+// ServiceOption is a functional option for configuring a Service at
+// construction time. Using options instead of post-construction field mutation
+// keeps the Service immutable after New() returns and makes the call site in
+// main.go self-documenting.
+type ServiceOption func(*Service)
+
+// WithProgress attaches a progress reporter to the service.
+// When not provided, a no-op reporter is used.
+func WithProgress(p domain.Progress) ServiceOption {
+	return func(s *Service) { s.Progress = p }
+}
+
+// WithChunkThreshold overrides the diff-size threshold above which map-reduce
+// chunking is used. Must be a positive value; zero is ignored (keeps default).
+func WithChunkThreshold(n int) ServiceOption {
+	return func(s *Service) {
+		if n > 0 {
+			s.ChunkThreshold = n
+		}
+	}
+}
+
+// WithMaxConcurrency overrides the maximum number of parallel LLM calls.
+// Zero or negative is ignored (keeps default; runtime.NumCPU() is used at
+// call time).
+func WithMaxConcurrency(n int) ServiceOption {
+	return func(s *Service) {
+		if n > 0 {
+			s.MaxConcurrency = n
+		}
+	}
+}
+
+// WithMaxRetries sets the number of retry attempts for transient LLM errors.
+// Zero means a single attempt (no retries), which is the default.
+func WithMaxRetries(n int) ServiceOption {
+	return func(s *Service) { s.MaxRetries = n }
+}
+
+// WithRetryBaseDelay sets the initial exponential back-off delay between
+// retries. Zero is ignored (keeps the package default of 2 s).
+func WithRetryBaseDelay(d time.Duration) ServiceOption {
+	return func(s *Service) {
+		if d > 0 {
+			s.RetryBaseDelay = d
+		}
+	}
+}
+
+// New constructs a Service with sensible defaults. Pass ServiceOption values
+// to override any field — this is the only supported way to configure the
+// service after the constructor returns.
+func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *slog.Logger, opts ...ServiceOption) *Service {
+	svc := &Service{
 		Git:            git,
 		LLM:            llm,
 		Cache:          cache,
@@ -121,6 +173,10 @@ func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *s
 		MaxConcurrency: DefaultServiceMaxConcurrency,
 		BinaryHash:     BinaryHash(),
 	}
+	for _, opt := range opts {
+		opt(svc)
+	}
+	return svc
 }
 
 // concurrency returns the effective concurrency limit.

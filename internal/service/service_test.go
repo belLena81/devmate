@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type fakeGit struct {
@@ -379,5 +380,99 @@ func TestPrService_EmptyCommits_ReturnsErrEmptyPR(t *testing.T) {
 	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
 	if !errors.Is(err, domain.ErrEmptyPR) {
 		t.Errorf("expected ErrEmptyPR when no commits exist between branches, got %v", err)
+	}
+}
+
+func TestNew_Defaults(t *testing.T) {
+	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger())
+
+	if svc.ChunkThreshold != DefaultChunkThreshold {
+		t.Errorf("ChunkThreshold: got %d, want %d", svc.ChunkThreshold, DefaultChunkThreshold)
+	}
+	if svc.MaxConcurrency != DefaultServiceMaxConcurrency {
+		t.Errorf("MaxConcurrency: got %d, want %d", svc.MaxConcurrency, DefaultServiceMaxConcurrency)
+	}
+	if svc.MaxRetries != 0 {
+		t.Errorf("MaxRetries: got %d, want 0", svc.MaxRetries)
+	}
+	if svc.RetryBaseDelay != 0 {
+		t.Errorf("RetryBaseDelay: got %v, want 0 (uses package default)", svc.RetryBaseDelay)
+	}
+	if svc.Progress != nil {
+		t.Error("Progress: expected nil (no-op) by default")
+	}
+}
+
+func TestNew_WithProgress(t *testing.T) {
+	fp := &fakeProgress{}
+	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithProgress(fp))
+	if svc.Progress != fp {
+		t.Error("WithProgress: progress reporter not applied")
+	}
+}
+
+func TestNew_WithChunkThreshold(t *testing.T) {
+	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithChunkThreshold(8000))
+	if svc.ChunkThreshold != 8000 {
+		t.Errorf("WithChunkThreshold: got %d, want 8000", svc.ChunkThreshold)
+	}
+}
+
+// WithChunkThreshold(0) must be a no-op — zero is not a valid threshold.
+func TestNew_WithChunkThreshold_ZeroIgnored(t *testing.T) {
+	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithChunkThreshold(0))
+	if svc.ChunkThreshold != DefaultChunkThreshold {
+		t.Errorf("WithChunkThreshold(0) should keep default %d, got %d", DefaultChunkThreshold, svc.ChunkThreshold)
+	}
+}
+
+func TestNew_WithMaxConcurrency(t *testing.T) {
+	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithMaxConcurrency(4))
+	if svc.MaxConcurrency != 4 {
+		t.Errorf("WithMaxConcurrency: got %d, want 4", svc.MaxConcurrency)
+	}
+}
+
+func TestNew_WithMaxRetries(t *testing.T) {
+	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithMaxRetries(3))
+	if svc.MaxRetries != 3 {
+		t.Errorf("WithMaxRetries: got %d, want 3", svc.MaxRetries)
+	}
+}
+
+// WithMaxRetries(0) is a valid value (no retries) and must be applied.
+func TestNew_WithMaxRetries_ZeroIsValid(t *testing.T) {
+	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithMaxRetries(5), WithMaxRetries(0))
+	if svc.MaxRetries != 0 {
+		t.Errorf("WithMaxRetries(0): got %d, want 0", svc.MaxRetries)
+	}
+}
+
+func TestNew_WithRetryBaseDelay(t *testing.T) {
+	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithRetryBaseDelay(500*time.Millisecond))
+	if svc.RetryBaseDelay != 500*time.Millisecond {
+		t.Errorf("WithRetryBaseDelay: got %v, want 500ms", svc.RetryBaseDelay)
+	}
+}
+
+// Multiple options applied in order — last write wins on the same field.
+func TestNew_MultipleOptions_AppliedInOrder(t *testing.T) {
+	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(),
+		WithChunkThreshold(1000),
+		WithMaxConcurrency(6),
+		WithMaxRetries(2),
+		WithRetryBaseDelay(100*time.Millisecond),
+	)
+	if svc.ChunkThreshold != 1000 {
+		t.Errorf("ChunkThreshold: got %d, want 1000", svc.ChunkThreshold)
+	}
+	if svc.MaxConcurrency != 6 {
+		t.Errorf("MaxConcurrency: got %d, want 6", svc.MaxConcurrency)
+	}
+	if svc.MaxRetries != 2 {
+		t.Errorf("MaxRetries: got %d, want 2", svc.MaxRetries)
+	}
+	if svc.RetryBaseDelay != 100*time.Millisecond {
+		t.Errorf("RetryBaseDelay: got %v, want 100ms", svc.RetryBaseDelay)
 	}
 }

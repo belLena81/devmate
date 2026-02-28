@@ -17,6 +17,20 @@ func newCommitApp(svc CommitService) *App {
 	return app
 }
 
+func TestCommitCmd_NilService_ReturnsErrServiceNotInitialized(t *testing.T) {
+	app := &App{} // all services nil
+	app.rootCmd = buildRootCmd(app)
+	app.rootCmd.SetArgs([]string{"commit"})
+
+	err := app.Execute()
+	if err == nil {
+		t.Fatal("expected error when commitService is nil")
+	}
+	if !errors.Is(err, domain.ErrServiceNotInitialized) {
+		t.Errorf("expected ErrServiceNotInitialized, got %v", err)
+	}
+}
+
 func TestCommitCmd_IsRegistered(t *testing.T) {
 	app := newCommitApp(&fakeCommitService{})
 	cmd, _, err := app.rootCmd.Find([]string{"commit"})

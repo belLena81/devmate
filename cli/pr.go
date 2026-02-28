@@ -40,6 +40,9 @@ func newPrCmd(a *App) *cobra.Command {
 		if err != nil {
 			return err
 		}
+		if a.prService == nil {
+			return domain.ErrServiceNotInitialized
+		}
 		pr, err := a.prService.DraftPrDescription(cmd.Context(), prOpts)
 		if err != nil {
 			return err

@@ -20,39 +20,38 @@ type App struct {
 // The git runner is resolved from the working directory.
 // Caching is disabled — use NewAppWithService for full wiring including cache.
 func NewApp(llm domain.LLM) (*App, error) {
-	svc := service.New(nil, llm, service.NoopCache{}, "", slog.Default())
-	return newAppFromService(svc)
-}
-
-// NewAppWithService constructs the CLI application from a fully wired service.
-// This is the production path used by main.go (includes cache and model name).
-func NewAppWithService(svc *service.Service) (*App, error) {
-	return newAppFromService(svc)
-}
-
-func newAppFromService(svc *service.Service) (*App, error) {
-	// Reuse the logger already configured on the service (respects the log
-	// level from config). Fall back to slog.Default() only when svc.Log is
-	// nil, which happens in tests that build a bare service without a logger.
-	log := svc.Log
-	if log == nil {
-		log = slog.Default()
-	}
+	log := slog.Default()
 
 	repoRoot, err := git.RepoRoot()
 	if err != nil {
 		log.Error("failed to find git repo root", "error", err)
 		return nil, err
 	}
-	svc.Git = git.New(repoRoot, log)
+	gitClient := git.New(repoRoot, log)
 
+	svc := service.New(gitClient, llm, service.NoopCache{}, "", log)
+	return newAppFromService(svc), nil
+}
+
+// NewAppWithService constructs the CLI application from a fully wired service.
+// This is the production path used by main.go (includes cache and model name).
+// The git client must already be set on svc before calling this function;
+// NewAppWithService never modifies the service it receives.
+func NewAppWithService(svc *service.Service) (*App, error) {
+	return newAppFromService(svc), nil
+}
+
+// newAppFromService wires the given service into an App. It is a pure
+// constructor: it reads from svc but never mutates it. Callers are responsible
+// for ensuring svc.Git is set before calling into any command that needs it.
+func newAppFromService(svc *service.Service) *App {
 	app := &App{
 		commitService: svc,
 		branchService: svc,
 		prService:     svc,
 	}
 	app.rootCmd = buildRootCmd(app)
-	return app, nil
+	return app
 }
 
 func (a *App) Execute() error {

@@ -77,6 +77,26 @@ func noopLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func TestNewAppWithService_DoesNotMutateService(t *testing.T) {
+	svc := &service.Service{
+		LLM:   &stubLLM{},
+		Cache: service.NoopCache{},
+		Log:   noopLogger(),
+		// Git is intentionally left nil: NewAppWithService must not overwrite it.
+		Git: nil,
+	}
+
+	_, err := cli.NewAppWithService(svc)
+	if err != nil {
+		t.Fatalf("NewAppWithService: %v", err)
+	}
+
+	// The constructor must never assign a new GitClient to the caller's service.
+	if svc.Git != nil {
+		t.Error("NewAppWithService must not mutate svc.Git (unexpected side-effect)")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // App construction
 // ---------------------------------------------------------------------------

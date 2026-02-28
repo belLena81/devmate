@@ -3,6 +3,7 @@ package main
 import (
 	"devmate/cli"
 	"devmate/internal/config"
+	"devmate/internal/infra/git"
 	"devmate/internal/infra/llm"
 	"devmate/internal/infra/progress"
 	"devmate/internal/service"
@@ -35,12 +36,25 @@ func main() {
 	cache := buildCache(cfg.Cache.Dir, log)
 	spinner := progress.NewWriter(stderr)
 
-	svc := service.New(nil, ollamaClient, cache, ollamaClient.Model(), log)
-	svc.Progress = spinner
-	svc.ChunkThreshold = cfg.Service.ChunkThreshold
-	svc.MaxConcurrency = cfg.Service.MaxConcurrency
-	svc.MaxRetries = cfg.Service.MaxRetries
-	svc.RetryBaseDelay = cfg.Service.RetryBaseDelay()
+	repoRoot, err := git.RepoRoot()
+	if err != nil {
+		log.Error("failed to find git repo root", "error", err)
+		os.Exit(1)
+	}
+	gitClient := git.New(repoRoot, log)
+
+	svc := service.New(
+		gitClient,
+		ollamaClient,
+		cache,
+		ollamaClient.Model(),
+		log,
+		service.WithProgress(spinner),
+		service.WithChunkThreshold(cfg.Service.ChunkThreshold),
+		service.WithMaxConcurrency(cfg.Service.MaxConcurrency),
+		service.WithMaxRetries(cfg.Service.MaxRetries),
+		service.WithRetryBaseDelay(cfg.Service.RetryBaseDelay()),
+	)
 
 	app, err := cli.NewAppWithService(svc)
 	if err != nil {
