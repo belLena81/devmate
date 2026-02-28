@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // ─── countingLLM ────────────────────────────────────────────────────────────
@@ -26,6 +27,11 @@ func (c *countingLLM) Generate(_ context.Context, prompt string) (string, error)
 	}
 	return c.response, nil
 }
+
+// testRetryDelay is a negligible delay used in retry tests so that back-off
+// sleeps do not slow down the test suite. Production code uses defaultRetryBaseDelay
+// (2 s), which would make exhausted-retry tests take 6+ seconds each.
+const testRetryDelay = time.Millisecond
 
 // ─── PR: mapReducePr ────────────────────────────────────────────────────────
 
@@ -218,10 +224,11 @@ func TestDraftBranchName_LLMError_StillCallsDone(t *testing.T) {
 func TestDraftMessage_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 	llm := &countingLLM{failTimes: 2, response: "feat: add thing"}
 	svc := Service{
-		Git:        &fakeGit{diff: "some diff"},
-		LLM:        llm,
-		Log:        noopLogger(),
-		MaxRetries: 3,
+		Git:            &fakeGit{diff: "some diff"},
+		LLM:            llm,
+		Log:            noopLogger(),
+		MaxRetries:     3,
+		RetryBaseDelay: testRetryDelay,
 	}
 
 	result, err := svc.DraftMessage(context.Background(), CommitOptions{})
@@ -239,10 +246,11 @@ func TestDraftMessage_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 func TestDraftMessage_Retry_ExhaustedReturnsError(t *testing.T) {
 	llm := &countingLLM{failTimes: 10, response: "never"}
 	svc := Service{
-		Git:        &fakeGit{diff: "some diff"},
-		LLM:        llm,
-		Log:        noopLogger(),
-		MaxRetries: 2,
+		Git:            &fakeGit{diff: "some diff"},
+		LLM:            llm,
+		Log:            noopLogger(),
+		MaxRetries:     2,
+		RetryBaseDelay: testRetryDelay,
 	}
 
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
@@ -254,10 +262,11 @@ func TestDraftMessage_Retry_ExhaustedReturnsError(t *testing.T) {
 func TestDraftMessage_Retry_ZeroRetries_FailsImmediately(t *testing.T) {
 	llm := &countingLLM{failTimes: 1, response: "msg"}
 	svc := Service{
-		Git:        &fakeGit{diff: "some diff"},
-		LLM:        llm,
-		Log:        noopLogger(),
-		MaxRetries: 0, // no retries — first failure is final
+		Git:            &fakeGit{diff: "some diff"},
+		LLM:            llm,
+		Log:            noopLogger(),
+		MaxRetries:     0, // no retries — first failure is final
+		RetryBaseDelay: testRetryDelay,
 	}
 
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
@@ -272,10 +281,11 @@ func TestDraftMessage_Retry_ZeroRetries_FailsImmediately(t *testing.T) {
 func TestDraftPrDescription_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 	llm := &countingLLM{failTimes: 1, response: "PR description"}
 	svc := Service{
-		Git:        &fakeGit{commits: []string{"feat: thing"}},
-		LLM:        llm,
-		Log:        noopLogger(),
-		MaxRetries: 2,
+		Git:            &fakeGit{commits: []string{"feat: thing"}},
+		LLM:            llm,
+		Log:            noopLogger(),
+		MaxRetries:     2,
+		RetryBaseDelay: testRetryDelay,
 	}
 
 	result, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
@@ -290,9 +300,10 @@ func TestDraftPrDescription_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 func TestDraftBranchName_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 	llm := &countingLLM{failTimes: 1, response: "feat/add-auth"}
 	svc := Service{
-		LLM:        llm,
-		Log:        noopLogger(),
-		MaxRetries: 2,
+		LLM:            llm,
+		Log:            noopLogger(),
+		MaxRetries:     2,
+		RetryBaseDelay: testRetryDelay,
 	}
 
 	result, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: "add authentication"})
@@ -307,9 +318,10 @@ func TestDraftBranchName_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 func TestDraftBranchName_Retry_ExhaustedReturnsError(t *testing.T) {
 	llm := &countingLLM{failTimes: 10, response: "never"}
 	svc := Service{
-		LLM:        llm,
-		Log:        noopLogger(),
-		MaxRetries: 2,
+		LLM:            llm,
+		Log:            noopLogger(),
+		MaxRetries:     2,
+		RetryBaseDelay: testRetryDelay,
 	}
 
 	_, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: "some task"})
@@ -321,10 +333,11 @@ func TestDraftBranchName_Retry_ExhaustedReturnsError(t *testing.T) {
 func TestDraftPrDescription_Retry_ExhaustedReturnsError(t *testing.T) {
 	llm := &countingLLM{failTimes: 10, response: "never"}
 	svc := Service{
-		Git:        &fakeGit{commits: []string{"feat: thing"}},
-		LLM:        llm,
-		Log:        noopLogger(),
-		MaxRetries: 2,
+		Git:            &fakeGit{commits: []string{"feat: thing"}},
+		LLM:            llm,
+		Log:            noopLogger(),
+		MaxRetries:     2,
+		RetryBaseDelay: testRetryDelay,
 	}
 
 	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
