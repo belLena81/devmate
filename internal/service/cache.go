@@ -146,9 +146,9 @@ func branchCacheKey(model, binaryHash, task, typeStr, modeStr string, explain bo
 }
 
 // prCacheKey builds the cache key for a DraftPrDescription call.
-// Inputs: model, commit messages (joined), type override, mode, explain flag.
+// Inputs: model, binaryHash, commit messages (joined), type override, mode, explain flag.
 func prCacheKey(model, binaryHash string, commits []string, typeStr, modeStr string, explain bool) string {
-	return buildCacheKey(prTmplHash, model, strings.Join(commits, "\n"), typeStr, modeStr, boolStr(explain))
+	return buildCacheKey(prTmplHash, model, binaryHash, strings.Join(commits, "\n"), typeStr, modeStr, boolStr(explain))
 }
 
 func boolStr(b bool) string {

@@ -33,6 +33,33 @@ func (c *countingLLM) Generate(_ context.Context, prompt string) (string, error)
 // (2 s), which would make exhausted-retry tests take 6+ seconds each.
 const testRetryDelay = time.Millisecond
 
+func TestGenerateWithRetry_NilLLM_ReturnsError(t *testing.T) {
+	svc := &Service{
+		LLM: nil,
+		Log: noopLogger(),
+	}
+
+	var err error
+	require_no_panic_svc(t, func() {
+		_, err = svc.generateWithRetry(context.Background(), "prompt")
+	})
+	if err == nil {
+		t.Error("generateWithRetry with nil LLM must return an error, not panic")
+	}
+}
+
+// require_no_panic_svc is a local copy of the helper to avoid cross-package
+// dependency while keeping the test self-contained.
+func require_no_panic_svc(t *testing.T, fn func()) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("unexpected panic: %v", r)
+		}
+	}()
+	fn()
+}
+
 // ─── PR: mapReducePr ────────────────────────────────────────────────────────
 
 func TestDraftPrDescription_ChunkedCommits_UsesMapReduce(t *testing.T) {

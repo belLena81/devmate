@@ -176,6 +176,9 @@ func (s *Service) retryBaseDelay() time.Duration {
 // ctx is forwarded to every LLM call. A cancelled or expired context
 // short-circuits immediately without further retries.
 func (s *Service) generateWithRetry(ctx context.Context, prompt string) (string, error) {
+	if s.LLM == nil {
+		return "", fmt.Errorf("service: LLM is not configured (nil)")
+	}
 	attempts := s.MaxRetries + 1
 	delay := s.retryBaseDelay()
 

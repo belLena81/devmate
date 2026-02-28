@@ -57,10 +57,9 @@ const (
 	DefaultOllamaBaseURL         = "http://localhost:11434"
 	DefaultOllamaModel           = "llama3.2:3b"
 	DefaultOllamaRequestTimeout  = 3 * time.Minute
-	DefaultServiceChunkThreshold = 3000 // bytes; matches service.DefaultChunkThreshold
-	DefaultServiceMaxConcurrency = 2    // matches service.DefaultServiceMaxConcurrency
+	DefaultServiceChunkThreshold = 3000
+	DefaultServiceMaxConcurrency = 2
 	DefaultServiceMaxRetries     = 0
-	DefaultBaseDelaySec          = 20
 	DefaultLogLevel              = "info"
 )
 
@@ -212,7 +211,10 @@ func Load() (Config, error) {
 		log.Debug("config file not found, using built-in defaults", "path", path)
 	}
 
-	envCount := applyEnv(&cfg, log)
+	envCount, err := applyEnv(&cfg, log)
+	if err != nil {
+		return cfg, err
+	}
 	if envCount > 0 {
 		log.Debug("env var overrides applied", "count", envCount)
 	}
@@ -336,10 +338,12 @@ func logFileOverrides(log *slog.Logger, before, after Config) {
 // ─── Env-var overlay ──────────────────────────────────────────────────────────
 
 // applyEnv overrides any field for which the corresponding DEVMATE_* env var
-// is set to a non-empty string. Returns the number of overrides applied.
+// is set to a non-empty string. Returns (count, error) where count is the
+// number of overrides applied and error is non-nil if any integer env var
+// held an invalid value.
 // Each override is logged individually so the operator can see exactly which
 // env vars are in effect.
-func applyEnv(cfg *Config, log *slog.Logger) int {
+func applyEnv(cfg *Config, log *slog.Logger) (int, error) {
 	count := 0
 	override := func(key, val string, apply func()) {
 		log.Debug("env override", "key", key, "value", val)
@@ -354,23 +358,52 @@ func applyEnv(cfg *Config, log *slog.Logger) int {
 		override("ollama.model", v, func() { cfg.Ollama.Model = v })
 	}
 	if v := os.Getenv("DEVMATE_OLLAMA_REQUEST_TIMEOUT_SEC"); v != "" {
-		n := mustInt(v, "DEVMATE_OLLAMA_REQUEST_TIMEOUT_SEC")
+		n, err := parseIntEnv(v, "DEVMATE_OLLAMA_REQUEST_TIMEOUT_SEC")
+		if err != nil {
+			return count, err
+		}
 		override("ollama.request_timeout_sec", v, func() { cfg.Ollama.RequestTimeoutSec = n })
 	}
+	if v := os.Getenv("DEVMATE_OLLAMA_HTTP_MAX_RETRIES"); v != "" {
+		n, err := parseIntEnv(v, "DEVMATE_OLLAMA_HTTP_MAX_RETRIES")
+		if err != nil {
+			return count, err
+		}
+		override("ollama.http_max_retries", v, func() { cfg.Ollama.HTTPMaxRetries = n })
+	}
+	if v := os.Getenv("DEVMATE_OLLAMA_RETRY_BASE_DELAY_SEC"); v != "" {
+		n, err := parseIntEnv(v, "DEVMATE_OLLAMA_RETRY_BASE_DELAY_SEC")
+		if err != nil {
+			return count, err
+		}
+		override("ollama.retry_base_delay_sec", v, func() { cfg.Ollama.RetryBaseDelaySec = n })
+	}
 	if v := os.Getenv("DEVMATE_SERVICE_CHUNK_THRESHOLD"); v != "" {
-		n := mustInt(v, "DEVMATE_SERVICE_CHUNK_THRESHOLD")
+		n, err := parseIntEnv(v, "DEVMATE_SERVICE_CHUNK_THRESHOLD")
+		if err != nil {
+			return count, err
+		}
 		override("service.chunk_threshold", v, func() { cfg.Service.ChunkThreshold = n })
 	}
 	if v := os.Getenv("DEVMATE_SERVICE_MAX_CONCURRENCY"); v != "" {
-		n := mustInt(v, "DEVMATE_SERVICE_MAX_CONCURRENCY")
+		n, err := parseIntEnv(v, "DEVMATE_SERVICE_MAX_CONCURRENCY")
+		if err != nil {
+			return count, err
+		}
 		override("service.max_concurrency", v, func() { cfg.Service.MaxConcurrency = n })
 	}
 	if v := os.Getenv("DEVMATE_SERVICE_MAX_RETRIES"); v != "" {
-		n := mustInt(v, "DEVMATE_SERVICE_MAX_RETRIES")
+		n, err := parseIntEnv(v, "DEVMATE_SERVICE_MAX_RETRIES")
+		if err != nil {
+			return count, err
+		}
 		override("service.max_retries", v, func() { cfg.Service.MaxRetries = n })
 	}
 	if v := os.Getenv("DEVMATE_SERVICE_RETRY_BASE_DELAY_SEC"); v != "" {
-		n := mustInt(v, "DEVMATE_SERVICE_RETRY_BASE_DELAY_SEC")
+		n, err := parseIntEnv(v, "DEVMATE_SERVICE_RETRY_BASE_DELAY_SEC")
+		if err != nil {
+			return count, err
+		}
 		override("service.retry_base_delay_sec", v, func() { cfg.Service.RetryBaseDelaySec = n })
 	}
 	if v := os.Getenv("DEVMATE_CACHE_DIR"); v != "" {
@@ -379,17 +412,18 @@ func applyEnv(cfg *Config, log *slog.Logger) int {
 	if v := os.Getenv("DEVMATE_LOG_LEVEL"); v != "" {
 		override("log.level", v, func() { cfg.Log.Level = v })
 	}
-	return count
+	return count, nil
 }
 
-// mustInt parses s as an integer. It panics with a clear message on failure so
-// misconfigured env vars are caught at startup rather than causing silent bugs.
-func mustInt(s, name string) int {
+// parseIntEnv parses s as an integer for the named environment variable.
+// It returns a descriptive error on failure so Load() can surface a clear
+// message instead of crashing the process with a raw panic trace.
+func parseIntEnv(s, name string) (int, error) {
 	n, err := strconv.Atoi(s)
 	if err != nil {
-		panic(fmt.Sprintf("config: %s=%q is not a valid integer: %v", name, s, err))
+		return 0, fmt.Errorf("config: %s=%q is not a valid integer: %w", name, s, err)
 	}
-	return n
+	return n, nil
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

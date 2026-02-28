@@ -148,6 +148,51 @@ func TestLogConfig_SlogLevel(t *testing.T) {
 	}
 }
 
+func TestLoad_InvalidIntEnvVar_ReturnsError(t *testing.T) {
+	t.Setenv("DEVMATE_CONFIG", filepath.Join(t.TempDir(), "nonexistent.json"))
+
+	cases := []struct {
+		envKey string
+		envVal string
+	}{
+		{"DEVMATE_OLLAMA_REQUEST_TIMEOUT_SEC", "two"},
+		{"DEVMATE_SERVICE_CHUNK_THRESHOLD", "large"},
+		{"DEVMATE_SERVICE_MAX_CONCURRENCY", "many"},
+		{"DEVMATE_SERVICE_MAX_RETRIES", "three"},
+		{"DEVMATE_SERVICE_RETRY_BASE_DELAY_SEC", "slow"},
+		{"DEVMATE_OLLAMA_HTTP_MAX_RETRIES", "few"},
+		{"DEVMATE_OLLAMA_RETRY_BASE_DELAY_SEC", "quick"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.envKey, func(t *testing.T) {
+			t.Setenv(tc.envKey, tc.envVal)
+
+			// Must not panic — must return a non-nil error.
+			var cfg config.Config
+			var err error
+			require_no_panic(t, func() {
+				cfg, err = config.Load()
+			})
+			_ = cfg
+			if err == nil {
+				t.Errorf("Load() with %s=%q: expected error, got nil", tc.envKey, tc.envVal)
+			}
+		})
+	}
+}
+
+// require_no_panic runs fn and fails the test if it panics.
+func require_no_panic(t *testing.T, fn func()) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("unexpected panic: %v", r)
+		}
+	}()
+	fn()
+}
+
 // writeTempConfig writes data as JSON to a temp file and returns its path.
 func writeTempConfig(t *testing.T, data any) string {
 	t.Helper()

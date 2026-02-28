@@ -72,7 +72,43 @@ func TestBuildCacheKey_NoCollision_AdjacentFieldConcat(t *testing.T) {
 	}
 }
 
-func TestBuildCacheKey_IsHexSHA256(t *testing.T) {
+func TestPrCacheKey_DifferentBinaryHash_DifferentKey(t *testing.T) {
+	commits := []string{"feat: add login", "fix: typo"}
+	k1 := prCacheKey("model", "hash-v1", commits, "feat", "short", false)
+	k2 := prCacheKey("model", "hash-v2", commits, "feat", "short", false)
+	if k1 == k2 {
+		t.Error("prCacheKey: different binaryHash must produce different keys — stale PR cache bug")
+	}
+}
+
+func TestPrCacheKey_SameBinaryHash_SameKey(t *testing.T) {
+	commits := []string{"feat: add login"}
+	k1 := prCacheKey("model", "abc123", commits, "", "short", false)
+	k2 := prCacheKey("model", "abc123", commits, "", "short", false)
+	if k1 != k2 {
+		t.Error("prCacheKey: identical inputs must produce the same key")
+	}
+}
+
+// Symmetry check: commit, branch, and pr cache-key helpers all incorporate
+// binaryHash so a binary upgrade invalidates all three command caches.
+func TestCacheKey_AllVariants_IncludeBinaryHash(t *testing.T) {
+	commits := []string{"feat: thing"}
+	old := "old-binary"
+	neu := "new-binary"
+
+	if commitCacheKey("m", old, "diff", "", "short", false) ==
+		commitCacheKey("m", neu, "diff", "", "short", false) {
+		t.Error("commitCacheKey must differ on binaryHash change")
+	}
+	if branchCacheKey("m", old, "task", "", "short", false) ==
+		branchCacheKey("m", neu, "task", "", "short", false) {
+		t.Error("branchCacheKey must differ on binaryHash change")
+	}
+	if prCacheKey("m", old, commits, "", "short", false) ==
+		prCacheKey("m", neu, commits, "", "short", false) {
+		t.Error("prCacheKey must differ on binaryHash change")
+	}
 	key := buildCacheKey(commitTmplHash, "model", "diff", "", "short", "false")
 	if len(key) != 64 {
 		t.Errorf("expected 64-char hex SHA256, got len=%d: %q", len(key), key)
