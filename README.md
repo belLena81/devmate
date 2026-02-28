@@ -84,6 +84,38 @@ devmate pr feat/payment-webhook-retry main --detailed
 
 Output includes a title, summary, technical decisions, and risk/impact notes.
 
+### `devmate cache`
+
+Manages the local LLM response cache.
+
+#### `devmate cache stat`
+
+Lists every cached entry with its key, size in bytes, and last-written timestamp. Output is sorted newest-first.
+
+```sh
+devmate cache stat
+```
+
+```
+KEY                                                               SIZE (B)  MODIFIED
+a3f1c9e2b7d084561f2a3c4e5d6b7890abcdef1234567890abcdef12345678       512  2025-08-01 14:22:01
+d94e2b1f9a3c0587e6d241a8f7b5c390fedcba9876543210fedcba9876543210      1024  2025-07-30 09:11:44
+```
+
+If the cache is empty, prints `No cached entries.`
+
+#### `devmate cache clean`
+
+Deletes all cached entries. The next request for any command will contact the LLM regardless of prior inputs.
+
+```sh
+devmate cache clean
+```
+
+```
+Cache cleared.
+```
+
 ## Installation
 
 **From source:**
@@ -116,13 +148,14 @@ The config file lives at `./config/config.json` relative to the working director
     "base_url": "http://localhost:11434",
     "model": "llama3.2:3b",
     "request_timeout_sec": 180,
-    "http_max_retries": 3,
-    "retry_base_delay_sec": 2
+    "http_max_retries": 0,
+    "retry_base_delay_sec": 0
   },
   "service": {
     "chunk_threshold": 3000,
     "max_concurrency": 2,
-    "max_retries": 0
+    "max_retries": 0,
+    "retry_base_delay_sec": 2
   },
   "cache": {
     "dir": ""
@@ -146,8 +179,11 @@ The config file lives at `./config/config.json` relative to the working director
 | `DEVMATE_SERVICE_CHUNK_THRESHOLD` | `service.chunk_threshold` |
 | `DEVMATE_SERVICE_MAX_CONCURRENCY` | `service.max_concurrency` |
 | `DEVMATE_SERVICE_MAX_RETRIES` | `service.max_retries` |
+| `DEVMATE_SERVICE_RETRY_BASE_DELAY_SEC` | `service.retry_base_delay_sec` |
 | `DEVMATE_CACHE_DIR` | `cache.dir` |
 | `DEVMATE_LOG_LEVEL` | `log.level` |
+
+All integer env vars are validated at startup: a non-integer value (e.g. `DEVMATE_SERVICE_MAX_RETRIES=two`) causes `Load()` to return a descriptive error rather than crash.
 
 **Seeing config load progress:** Set `DEVMATE_LOG_LEVEL=debug` to see which values were loaded from the file, which came from env vars, and which fell back to defaults:
 
@@ -174,22 +210,26 @@ This keeps every prompt within the model's context window regardless of reposito
 
 Responses are cached to `~/.cache/devmate` (overridable via `cache.dir` or `DEVMATE_CACHE_DIR`). Cache keys are derived from: model name, binary hash, git input (diff or commit list), and all option flags. Changing any of these produces a new key. Changing the binary invalidates all prior entries automatically.
 
+Use `devmate cache stat` to inspect the cache and `devmate cache clean` to wipe it.
+
 ## Retry behaviour
 
 devmate has two independent retry layers:
 
-- **HTTP retries** (`ollama.http_max_retries`, default 3) — the Ollama client retries transient HTTP failures (5xx, timeout) with exponential back-off starting at `retry_base_delay_sec`.
-- **Service retries** (`service.max_retries`, default 0) — an additional safety net at the service layer, on top of HTTP retries.
+- **HTTP retries** (`ollama.http_max_retries`, default 0) — the Ollama client retries transient HTTP failures with exponential back-off starting at `ollama.retry_base_delay_sec`.
+- **Service retries** (`service.max_retries`, default 0) — an additional safety net at the service layer, on top of HTTP retries. Back-off starts at `service.retry_base_delay_sec` (default 2 s) and doubles on each attempt.
 
 ## Project structure
 
 ```
 cmd/devmate/          entry point — loads config, wires dependencies, runs CLI
 cli/                  Cobra commands and option parsing
+  cache.go            cache clean and cache stat subcommands
 internal/
   config/             unified configuration (file + env + defaults)
-  domain/             core interfaces (LLM, GitClient, Progress, Cache)
+  domain/             core interfaces (LLM, GitClient, Progress)
   service/            orchestration — chunking, map-reduce, caching, retry
+    cache.go          Cache interface, DiskCache, CacheInspector, NoopCache
   infra/
     git/              read-only Git runner (diff, log)
     llm/              Ollama HTTP client with retry
@@ -204,7 +244,7 @@ Dependency direction: `CLI → Service → Domain ← Infrastructure`. Infrastru
 go test ./...
 ```
 
-Test coverage spans: config loading, CLI option parsing, service orchestration, map-reduce pipeline, chunker, cache key derivation, disk cache, prompt templates, sanitisation, Git runner, Ollama client retry logic, and the progress spinner.
+Test coverage spans: config loading and env-var validation, CLI option parsing, nil-service guards, service orchestration, map-reduce pipeline, chunker, cache key derivation, disk cache (including `Stat` and `Clear`), prompt templates, sanitisation, Git runner, Ollama client retry logic, and the progress spinner.
 
 Tests use interface-based fakes — no real Git repository or Ollama instance is required.
 
