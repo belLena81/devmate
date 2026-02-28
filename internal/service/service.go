@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"devmate/internal/config"
 	"devmate/internal/domain"
 	"fmt"
 	"io"
@@ -108,19 +109,6 @@ type Service struct {
 	retryBaseDelay time.Duration // initial back-off between retries; 0 uses defaultRetryBaseDelay
 }
 
-func NewService(git domain.GitClient, llm domain.LLM, cache Cache, logger *slog.Logger, threshold int) *Service {
-	return &Service{
-		git:            git,
-		llm:            llm,
-		cache:          cache,
-		model:          "",
-		log:            logger,
-		chunkThreshold: threshold,
-		maxConcurrency: DefaultServiceMaxConcurrency,
-		binaryHash:     BinaryHash(),
-	}
-}
-
 const defaultRetryBaseDelay = 2 * time.Second
 
 // Settings is a functional settings for configuring a Service at
@@ -182,8 +170,8 @@ func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *s
 		cache:          cache,
 		model:          model,
 		log:            log.With("component", "service"),
-		chunkThreshold: DefaultChunkThreshold,
-		maxConcurrency: DefaultServiceMaxConcurrency,
+		chunkThreshold: config.DefaultServiceChunkThreshold,
+		maxConcurrency: config.DefaultServiceMaxConcurrency,
 		binaryHash:     BinaryHash(),
 	}
 	for _, opt := range opts {
@@ -357,7 +345,7 @@ func (s *Service) mapReduce(ctx context.Context, diff string, options CommitOpti
 	s.Log().Debug("starting map-reduce",
 		"total_bytes", len(diff),
 		"chunks", len(chunks),
-		"threshold", s.ChunkThreshold,
+		"threshold", s.ChunkThreshold(),
 	)
 
 	// Map phase: summarize all chunks in parallel.

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"devmate/internal/config"
 	"errors"
 	"fmt"
 	"strings"
@@ -230,7 +231,7 @@ func TestDraftBranchName_LongTask_StillReturnsResult(t *testing.T) {
 	svc := Service{
 		llm:            &fakeLLM{response: "feat/user-management"},
 		log:            noopLogger(),
-		chunkThreshold: DefaultChunkThreshold,
+		chunkThreshold: config.DefaultServiceChunkThreshold,
 	}
 
 	result, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: longTask})

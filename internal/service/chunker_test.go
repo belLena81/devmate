@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"devmate/internal/config"
 	"devmate/internal/domain"
 	"fmt"
 	"strings"
@@ -79,7 +80,7 @@ func TestDraftMessage_LargeDiff_UsesMapReduce(t *testing.T) {
 		b.WriteString("+" + strings.Repeat("x", 200) + "\n")
 	}
 
-	svc := NewService(&fakeGit{diff: b.String()}, fake, &NoopCache{}, noopLogger(), 500)
+	svc := New(&fakeGit{diff: b.String()}, fake, &NoopCache{}, config.DefaultOllamaModel, noopLogger(), WithChunkThreshold(500))
 
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {

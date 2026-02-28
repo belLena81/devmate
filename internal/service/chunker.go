@@ -6,15 +6,6 @@ import (
 	"strings"
 )
 
-// DefaultChunkThreshold is the diff size in bytes above which map-reduce is
-// used instead of sending the whole diff in a single prompt.
-// 3 000 bytes ≈ 750 tokens — comfortably inside llama3.2:3b's context window
-// while leaving room for the prompt template and the generated response.
-const DefaultChunkThreshold = 3000
-
-// DefaultServiceMaxConcurrency is the default number of parallel LLM calls.
-const DefaultServiceMaxConcurrency = 2
-
 // Chunk is one piece of a diff together with the file names it covers.
 // File names are used only for logging — the content is what matters to the LLM.
 type Chunk struct {

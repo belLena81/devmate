@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"devmate/internal/config"
 	"devmate/internal/domain"
 	"errors"
 	"io"
@@ -395,11 +396,11 @@ func TestPrService_EmptyCommits_ReturnsErrEmptyPR(t *testing.T) {
 func TestNew_Defaults(t *testing.T) {
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger())
 
-	if svc.ChunkThreshold() != DefaultChunkThreshold {
-		t.Errorf("ChunkThreshold: got %d, want %d", svc.ChunkThreshold(), DefaultChunkThreshold)
+	if svc.ChunkThreshold() != config.DefaultServiceChunkThreshold {
+		t.Errorf("ChunkThreshold: got %d, want %d", svc.ChunkThreshold(), config.DefaultServiceChunkThreshold)
 	}
-	if svc.concurrency() != DefaultServiceMaxConcurrency {
-		t.Errorf("MaxConcurrency: got %d, want %d", svc.concurrency(), DefaultServiceMaxConcurrency)
+	if svc.concurrency() != config.DefaultServiceMaxConcurrency {
+		t.Errorf("MaxConcurrency: got %d, want %d", svc.concurrency(), config.DefaultServiceMaxConcurrency)
 	}
 	if svc.MaxRetries() != 0 {
 		t.Errorf("MaxRetries: got %d, want 0", svc.MaxRetries())
@@ -430,8 +431,8 @@ func TestNew_WithChunkThreshold(t *testing.T) {
 // WithChunkThreshold(0) must be a no-op — zero is not a valid threshold.
 func TestNew_WithChunkThreshold_ZeroIgnored(t *testing.T) {
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithChunkThreshold(0))
-	if svc.ChunkThreshold() != DefaultChunkThreshold {
-		t.Errorf("WithChunkThreshold(0) should keep default %d, got %d", DefaultChunkThreshold, svc.ChunkThreshold())
+	if svc.ChunkThreshold() != config.DefaultServiceChunkThreshold {
+		t.Errorf("WithChunkThreshold(0) should keep default %d, got %d", config.DefaultServiceChunkThreshold, svc.ChunkThreshold())
 	}
 }
 

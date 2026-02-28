@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"devmate/cli"
+	"devmate/internal/config"
 	"devmate/internal/domain"
 	"devmate/internal/service"
 	"errors"
@@ -81,7 +82,7 @@ func noopLogger() *slog.Logger {
 // does not modify any field of the Service it receives. The caller (main.go)
 // retains full ownership of the service after construction.
 func TestNewAppWithService_DoesNotMutateService(t *testing.T) {
-	svc := service.NewService(nil, &stubLLM{}, service.NoopCache{}, noopLogger(), 0)
+	svc := service.New(nil, &stubLLM{}, service.NoopCache{}, config.DefaultOllamaModel, noopLogger(), service.WithChunkThreshold(0))
 
 	_, err := cli.NewAppWithService(svc)
 	if err != nil {
@@ -115,7 +116,7 @@ func TestApp_RootCmd_IsNamed_devmate(t *testing.T) {
 }
 
 func TestNewAppWithService_ReturnsNonNilApp(t *testing.T) {
-	svc := service.NewService(nil, &stubLLM{}, service.NoopCache{}, noopLogger(), 0)
+	svc := service.New(nil, &stubLLM{}, service.NoopCache{}, config.DefaultOllamaModel, noopLogger(), service.WithChunkThreshold(0))
 	app, err := cli.NewAppWithService(svc)
 	if err != nil {
 		t.Fatalf("NewAppWithService: %v", err)
@@ -154,7 +155,7 @@ func TestApp_CacheStatCmd_IsRegistered(t *testing.T) {
 // NewAppWithService automatically derives the cacheService from svc.Cache so
 // callers do not need to wire it manually.
 func TestNewAppWithService_CacheService_DerivedFromServiceCache(t *testing.T) {
-	svc := service.NewService(nil, &stubLLM{}, service.NoopCache{}, noopLogger(), 0)
+	svc := service.New(nil, &stubLLM{}, service.NoopCache{}, config.DefaultOllamaModel, noopLogger(), service.WithChunkThreshold(0))
 	app, err := cli.NewAppWithService(svc)
 	if err != nil {
 		t.Fatalf("NewAppWithService: %v", err)
