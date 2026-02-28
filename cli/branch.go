@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"devmate/internal/domain"
 	"devmate/internal/service"
 	"fmt"
@@ -16,11 +17,11 @@ func NewBranch(task string, cmdType string, short, detailed, explain bool) (serv
 	if task == "" {
 		return service.BranchOptions{}, domain.MissingTaskDescription
 	}
-	return service.BranchOptions{task, domain.Options{ct, parseCmdMode(detailed), explain}}, nil
+	return service.BranchOptions{Task: task, Options: domain.Options{Type: ct, Mode: parseCmdMode(detailed), Explain: explain}}, nil
 }
 
 type BranchService interface {
-	DraftBranchName(opt service.BranchOptions) (string, error)
+	DraftBranchName(ctx context.Context, opt service.BranchOptions) (string, error)
 }
 
 func newBranchCmd(a *App) *cobra.Command {
@@ -36,12 +37,11 @@ func newBranchCmd(a *App) *cobra.Command {
 			// real construction — wired once you have infra ready
 			return domain.ServiceNotInitialized
 		}
-		msg, err := a.branchService.DraftBranchName(branchOpts)
+		msg, err := a.branchService.DraftBranchName(cmd.Context(), branchOpts)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintln(cmd.OutOrStdout(), msg)
-		//call service to run a command
 		return nil
 	}
 

@@ -27,12 +27,6 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Ollama.RequestTimeout() != config.DefaultOllamaRequestTimeout {
 		t.Errorf("RequestTimeout: got %v, want %v", cfg.Ollama.RequestTimeout(), config.DefaultOllamaRequestTimeout)
 	}
-	if cfg.Ollama.HTTPMaxRetries != config.DefaultOllamaHTTPMaxRetries {
-		t.Errorf("HTTPMaxRetries: got %d, want %d", cfg.Ollama.HTTPMaxRetries, config.DefaultOllamaHTTPMaxRetries)
-	}
-	if cfg.Ollama.RetryBaseDelay() != config.DefaultOllamaRetryBaseDelay {
-		t.Errorf("RetryBaseDelay: got %v, want %v", cfg.Ollama.RetryBaseDelay(), config.DefaultOllamaRetryBaseDelay)
-	}
 	if cfg.Service.ChunkThreshold != config.DefaultServiceChunkThreshold {
 		t.Errorf("ChunkThreshold: got %d, want %d", cfg.Service.ChunkThreshold, config.DefaultServiceChunkThreshold)
 	}
@@ -88,9 +82,6 @@ func TestLoad_FromFile(t *testing.T) {
 	}
 	if got, want := cfg.Ollama.HTTPMaxRetries, 5; got != want {
 		t.Errorf("HTTPMaxRetries: got %d, want %d", got, want)
-	}
-	if got, want := cfg.Ollama.RetryBaseDelay(), 4*time.Second; got != want {
-		t.Errorf("RetryBaseDelay: got %v, want %v", got, want)
 	}
 	if got, want := cfg.Service.ChunkThreshold, 8000; got != want {
 		t.Errorf("ChunkThreshold: got %d, want %d", got, want)

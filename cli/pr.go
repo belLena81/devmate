@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"devmate/internal/domain"
 	"devmate/internal/service"
 	"fmt"
@@ -19,11 +20,15 @@ func NewPr(source, target string, cmdType string, short, detailed, explain bool)
 	if target == "" {
 		return service.PrOptions{}, domain.MissingTargetBranch
 	}
-	return service.PrOptions{source, target, domain.Options{ct, parseCmdMode(detailed), explain}}, nil
+	return service.PrOptions{
+		SourceBranch:      source,
+		DestinationBranch: target,
+		Options:           domain.Options{Type: ct, Mode: parseCmdMode(detailed), Explain: explain},
+	}, nil
 }
 
 type PrService interface {
-	DraftPrDescription(opt service.PrOptions) (string, error)
+	DraftPrDescription(ctx context.Context, opt service.PrOptions) (string, error)
 }
 
 func newPrCmd(a *App) *cobra.Command {
@@ -35,7 +40,7 @@ func newPrCmd(a *App) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		pr, err := a.prService.DraftPrDescription(prOpts)
+		pr, err := a.prService.DraftPrDescription(cmd.Context(), prOpts)
 		if err != nil {
 			return err
 		}

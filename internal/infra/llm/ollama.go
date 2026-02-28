@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -21,9 +20,7 @@ type OllamaClient struct {
 	model          string
 	http           *http.Client
 	log            *slog.Logger
-	maxRetries     int
 	requestTimeout time.Duration
-	retryBaseDelay time.Duration
 }
 
 // Option configures an OllamaClient.
@@ -45,20 +42,9 @@ func WithLogger(log *slog.Logger) Option {
 	return func(c *OllamaClient) { c.log = log.With("component", "ollama") }
 }
 
-// WithMaxRetries sets how many times Generate retries a transient failure.
-// Pass 0 to disable retries entirely.
-func WithMaxRetries(n int) Option {
-	return func(c *OllamaClient) { c.maxRetries = n }
-}
-
 // WithRequestTimeout sets the per-request timeout.
 func WithRequestTimeout(d time.Duration) Option {
 	return func(c *OllamaClient) { c.requestTimeout = d }
-}
-
-// WithRetryBaseDelay sets the initial back-off delay between retries.
-func WithRetryBaseDelay(d time.Duration) Option {
-	return func(c *OllamaClient) { c.retryBaseDelay = d }
 }
 
 // NewOllamaClient returns a ready-to-use OllamaClient.
@@ -70,9 +56,7 @@ func NewOllamaClient(opts ...Option) *OllamaClient {
 		model:          "llama3.2:3b",
 		http:           &http.Client{}, // no client-level timeout; each Generate call sets its own
 		log:            slog.Default().With("component", "ollama"),
-		maxRetries:     3,
 		requestTimeout: 3 * time.Minute,
-		retryBaseDelay: 2 * time.Second,
 	}
 	for _, o := range opts {
 		o(c)
@@ -85,9 +69,7 @@ func NewOllamaClient(opts ...Option) *OllamaClient {
 type ClientConfig struct {
 	BaseURL        string
 	Model          string
-	HTTPMaxRetries int
 	RequestTimeout time.Duration
-	RetryBaseDelay time.Duration
 }
 
 // NewOllamaClientFromConfig returns an OllamaClient fully configured from cfg.
@@ -96,9 +78,7 @@ func NewOllamaClientFromConfig(cfg ClientConfig, opts ...Option) *OllamaClient {
 	return NewOllamaClient(append([]Option{
 		WithBaseURL(cfg.BaseURL),
 		WithModel(cfg.Model),
-		WithMaxRetries(cfg.HTTPMaxRetries),
 		WithRequestTimeout(cfg.RequestTimeout),
-		WithRetryBaseDelay(cfg.RetryBaseDelay),
 	}, opts...)...)
 }
 
@@ -122,24 +102,7 @@ type generateResponse struct {
 	Done     bool   `json:"done"`
 }
 
-// isTransient reports whether err is a failure worth retrying:
-// a 5xx status from Ollama or a network/context timeout.
-// Context cancellation (user abort or parent cancellation) is NOT retried.
-func isTransient(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, context.Canceled) {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	var statusErr *ollamaStatusError
-	return errors.As(err, &statusErr) && statusErr.code >= 500
-}
-
-// ollamaStatusError carries the HTTP status code so isTransient can inspect it.
+// ollamaStatusError carries the HTTP status code so callers can inspect it.
 type ollamaStatusError struct {
 	code int
 }
@@ -150,10 +113,11 @@ func (e *ollamaStatusError) Error() string {
 
 // Generate sends prompt to Ollama and returns the model's response text.
 // Streaming is disabled — the full response is returned in one call.
-// Transient failures (5xx, timeout) are retried up to c.maxRetries times
-// with exponential back-off. Non-transient errors (4xx, cancelled context)
-// are returned immediately.
-func (c *OllamaClient) Generate(prompt string) (string, error) {
+// ctx is forwarded to the HTTP request so callers (the service layer) can
+// cancel in-flight requests on the first error or via Ctrl-C.
+// Retry logic lives exclusively in the service layer (generateWithRetry),
+// so this method makes exactly one attempt and returns whatever happens.
+func (c *OllamaClient) Generate(ctx context.Context, prompt string) (string, error) {
 	body, err := json.Marshal(generateRequest{
 		Model:  c.model,
 		Prompt: prompt,
@@ -163,46 +127,20 @@ func (c *OllamaClient) Generate(prompt string) (string, error) {
 		return "", fmt.Errorf("ollama: marshal request: %w", err)
 	}
 
-	var lastErr error
-	delay := c.retryBaseDelay
+	c.log.Debug("sending generate request",
+		"model", c.model,
+		"prompt_bytes", len(prompt),
+	)
 
-	for attempt := 0; attempt <= c.maxRetries; attempt++ {
-		if attempt > 0 {
-			c.log.Debug("retrying generate request",
-				"attempt", attempt,
-				"of", c.maxRetries,
-				"after", delay,
-				"last_error", lastErr,
-			)
-			time.Sleep(delay)
-			delay *= 2
-		}
-
-		c.log.Debug("sending generate request",
-			"model", c.model,
-			"prompt_bytes", len(prompt),
-			"attempt", attempt+1,
-		)
-
-		text, err := c.doGenerate(body)
-		if err == nil {
-			return text, nil
-		}
-
-		lastErr = err
-		if !isTransient(err) {
-			// Non-transient: 4xx, cancelled — bail out immediately.
-			return "", lastErr
-		}
-		// Transient: loop and retry (unless we've exhausted attempts).
-	}
-
-	return "", fmt.Errorf("ollama: %d attempts failed, last error: %w", c.maxRetries+1, lastErr)
+	return c.doGenerate(ctx, body)
 }
 
 // doGenerate performs a single HTTP round-trip to /api/generate.
-func (c *OllamaClient) doGenerate(body []byte) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.requestTimeout)
+// It wraps ctx with a per-request timeout so that even a context.Background()
+// caller gets bounded by c.requestTimeout, while a shorter-lived parent context
+// will still win and cancel the request first.
+func (c *OllamaClient) doGenerate(ctx context.Context, body []byte) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.requestTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+generatePath, bytes.NewReader(body))
@@ -213,7 +151,7 @@ func (c *OllamaClient) doGenerate(body []byte) (string, error) {
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		// Unwrap context errors so isTransient can inspect them directly.
+		// Unwrap context errors so the caller can inspect them directly.
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}

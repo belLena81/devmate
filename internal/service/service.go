@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Service orchestrates git data retrieval, caching, and LLM generation.
@@ -21,10 +22,13 @@ type Service struct {
 	Model          string          // included in cache keys to isolate responses per model
 	Log            *slog.Logger
 	ChunkThreshold int
-	MaxConcurrency int    // max parallel LLM calls; 0 or negative means runtime.NumCPU()
-	BinaryHash     string // included in cache keys so a new binary never serves stale entries
-	MaxRetries     int    // service-level retry attempts for transient LLM errors; 0 means no retry
+	MaxConcurrency int           // max parallel LLM calls; 0 or negative means runtime.NumCPU()
+	BinaryHash     string        // included in cache keys so a new binary never serves stale entries
+	MaxRetries     int           // retry attempts for transient LLM errors; 0 means a single attempt
+	RetryBaseDelay time.Duration // initial back-off between retries; 0 uses defaultRetryBaseDelay
 }
+
+const defaultRetryBaseDelay = 2 * time.Second
 
 func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *slog.Logger) *Service {
 	return &Service{
@@ -73,28 +77,64 @@ func (s *Service) log() *slog.Logger {
 	return s.Log
 }
 
+// retryBaseDelay returns the configured base delay, falling back to the
+// package default when the field is zero (i.e. not explicitly set).
+func (s *Service) retryBaseDelay() time.Duration {
+	if s.RetryBaseDelay > 0 {
+		return s.RetryBaseDelay
+	}
+	return defaultRetryBaseDelay
+}
+
 // generateWithRetry calls s.LLM.Generate and retries up to s.MaxRetries times
-// on failure. Retry 0 means a single attempt with no retries.
-// All calls share the same prompt — this is a pure service-level safety net
-// on top of any HTTP-level retry already present in the LLM client.
-func (s *Service) generateWithRetry(prompt string) (string, error) {
-	var lastErr error
+// on failure with exponential back-off. MaxRetries=0 means a single attempt.
+//
+// This is the single retry site in the application. The LLM client (OllamaClient)
+// makes exactly one HTTP attempt per call; all retry logic lives here so the
+// total number of attempts is always MaxRetries+1, never multiplied.
+//
+// ctx is forwarded to every LLM call. A cancelled or expired context
+// short-circuits immediately without further retries.
+func (s *Service) generateWithRetry(ctx context.Context, prompt string) (string, error) {
 	attempts := s.MaxRetries + 1
+	delay := s.retryBaseDelay()
+
 	for i := 0; i < attempts; i++ {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		if i > 0 {
 			s.log().Debug("retrying LLM generate",
 				"attempt", i+1,
 				"of", attempts,
-				"last_error", lastErr,
+				"after", delay,
 			)
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+			delay *= 2
 		}
-		result, err := s.LLM.Generate(prompt)
+
+		result, err := s.LLM.Generate(ctx, prompt)
 		if err == nil {
 			return result, nil
 		}
-		lastErr = err
+
+		// Don't retry on context cancellation — the caller gave up.
+		if ctx.Err() != nil {
+			return "", err
+		}
+
+		s.log().Debug("LLM generate failed", "attempt", i+1, "of", attempts, "error", err)
+		if i == attempts-1 {
+			return "", fmt.Errorf("LLM generate failed after %d attempt(s): %w", attempts, err)
+		}
 	}
-	return "", fmt.Errorf("LLM generate failed after %d attempt(s): %w", attempts, lastErr)
+
+	// Unreachable, but satisfies the compiler.
+	return "", fmt.Errorf("LLM generate: no attempts made")
 }
 
 type CommitOptions struct {
@@ -112,7 +152,7 @@ type PrOptions struct {
 	domain.Options
 }
 
-func (s *Service) mapReducePr(commits []string, options PrOptions) (string, error) {
+func (s *Service) mapReducePr(ctx context.Context, commits []string, options PrOptions) (string, error) {
 	joined := strings.Join(commits, "\n")
 	chunks := PackChunks(joined, s.ChunkThreshold)
 
@@ -123,13 +163,13 @@ func (s *Service) mapReducePr(commits []string, options PrOptions) (string, erro
 	)
 
 	// Map phase: summarize each chunk of commits in parallel.
-	summaries, err := s.summarizeChunksParallel(chunks)
+	summaries, err := s.summarizeChunksParallel(ctx, chunks)
 	if err != nil {
 		return "", err
 	}
 
 	// Hierarchically reduce summaries until they fit within the threshold.
-	summaries, err = s.reduceSummaries(summaries)
+	summaries, err = s.reduceSummaries(ctx, summaries)
 	if err != nil {
 		return "", err
 	}
@@ -138,7 +178,7 @@ func (s *Service) mapReducePr(commits []string, options PrOptions) (string, erro
 	s.progress().Status("Synthesizing PR description...")
 
 	prompt := BuildPrSynthesisPrompt(summaries, options)
-	result, err := s.generateWithRetry(prompt)
+	result, err := s.generateWithRetry(ctx, prompt)
 	if err != nil {
 		return "", err
 	}
@@ -147,7 +187,7 @@ func (s *Service) mapReducePr(commits []string, options PrOptions) (string, erro
 	return sanitize(result), nil
 }
 
-func (s *Service) mapReduce(diff string, options CommitOptions) (string, error) {
+func (s *Service) mapReduce(ctx context.Context, diff string, options CommitOptions) (string, error) {
 	chunks := PackChunks(diff, s.ChunkThreshold)
 
 	s.log().Debug("starting map-reduce",
@@ -157,13 +197,13 @@ func (s *Service) mapReduce(diff string, options CommitOptions) (string, error) 
 	)
 
 	// Map phase: summarize all chunks in parallel.
-	summaries, err := s.summarizeChunksParallel(chunks)
+	summaries, err := s.summarizeChunksParallel(ctx, chunks)
 	if err != nil {
 		return "", err
 	}
 
 	// Hierarchically reduce summaries until they fit within the threshold.
-	summaries, err = s.reduceSummaries(summaries)
+	summaries, err = s.reduceSummaries(ctx, summaries)
 	if err != nil {
 		return "", err
 	}
@@ -172,7 +212,7 @@ func (s *Service) mapReduce(diff string, options CommitOptions) (string, error) 
 	s.progress().Status("Synthesizing commit message...")
 
 	prompt := BuildSynthesisPrompt(summaries, options.Type, options.Mode, options.Explain)
-	result, err := s.generateWithRetry(prompt)
+	result, err := s.generateWithRetry(ctx, prompt)
 	if err != nil {
 		return "", err
 	}
@@ -184,15 +224,20 @@ func (s *Service) mapReduce(diff string, options CommitOptions) (string, error) 
 // summarizeChunksParallel sends all chunk prompts to the LLM concurrently
 // (up to s.concurrency() at a time) and returns the summaries in their
 // original order. It returns the first error encountered (if any).
-func (s *Service) summarizeChunksParallel(chunks []Chunk) ([]string, error) {
+//
+// ctx is the parent context supplied by the public Draft* method. A derived
+// cancellation context is used internally so that the first chunk error aborts
+// all sibling goroutines that have not yet acquired the semaphore.
+func (s *Service) summarizeChunksParallel(ctx context.Context, chunks []Chunk) ([]string, error) {
 	n := len(chunks)
 	summaries := make([]string, n)
 	sem := make(chan struct{}, s.concurrency())
 	var completed atomic.Int64
 
-	// ctx is cancelled as soon as any chunk fails so remaining goroutines
-	// waiting on the semaphore abort instead of sending more requests to Ollama.
-	ctx, cancel := context.WithCancel(context.Background())
+	// cancelCtx is cancelled as soon as any chunk fails so remaining
+	// goroutines waiting on the semaphore abort instead of sending more
+	// requests to Ollama.
+	cancelCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var (
@@ -208,10 +253,11 @@ func (s *Service) summarizeChunksParallel(chunks []Chunk) ([]string, error) {
 		go func(idx int, ch Chunk) {
 			defer wg.Done()
 
-			// Abort before acquiring a slot if a sibling already failed.
+			// Abort before acquiring a slot if a sibling already failed
+			// or the parent context was cancelled.
 			select {
 			case sem <- struct{}{}:
-			case <-ctx.Done():
+			case <-cancelCtx.Done():
 				return
 			}
 			defer func() { <-sem }()
@@ -224,7 +270,7 @@ func (s *Service) summarizeChunksParallel(chunks []Chunk) ([]string, error) {
 			)
 
 			prompt := BuildChunkPrompt(ch.Content, idx+1, n)
-			summary, err := s.generateWithRetry(prompt)
+			summary, err := s.generateWithRetry(cancelCtx, prompt)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -260,7 +306,7 @@ func (s *Service) summarizeChunksParallel(chunks []Chunk) ([]string, error) {
 // combined size fits within ChunkThreshold. Each iteration packs summaries
 // into groups that fit the threshold, sends each group to the LLM in parallel
 // for condensation, and replaces the list with the condensed results.
-func (s *Service) reduceSummaries(summaries []string) ([]string, error) {
+func (s *Service) reduceSummaries(ctx context.Context, summaries []string) ([]string, error) {
 	for {
 		total := summariesSize(summaries)
 		if total <= s.ChunkThreshold || len(summaries) <= 1 {
@@ -278,8 +324,11 @@ func (s *Service) reduceSummaries(summaries []string) ([]string, error) {
 		sem := make(chan struct{}, s.concurrency())
 		var reduceCompleted atomic.Int64
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		// cancelCtx is scoped to this single reduce pass — it is cancelled
+		// (via the explicit cancel() call below) at the end of each iteration,
+		// not deferred to function exit. This avoids the defer-in-loop pitfall
+		// where deferred cancels stack up until reduceSummaries returns.
+		cancelCtx, cancel := context.WithCancel(ctx)
 
 		s.progress().Status(fmt.Sprintf("Reducing summaries: group 0/%d...", len(groups)))
 
@@ -302,7 +351,7 @@ func (s *Service) reduceSummaries(summaries []string) ([]string, error) {
 
 				select {
 				case sem <- struct{}{}:
-				case <-ctx.Done():
+				case <-cancelCtx.Done():
 					return
 				}
 				defer func() { <-sem }()
@@ -314,7 +363,7 @@ func (s *Service) reduceSummaries(summaries []string) ([]string, error) {
 				)
 
 				prompt := BuildReducePrompt(grp)
-				condensed, err := s.generateWithRetry(prompt)
+				condensed, err := s.generateWithRetry(cancelCtx, prompt)
 				if err != nil {
 					mu.Lock()
 					if firstErr == nil {
@@ -331,6 +380,7 @@ func (s *Service) reduceSummaries(summaries []string) ([]string, error) {
 		}
 
 		wg.Wait()
+		cancel() // always cancel the per-iteration context before the next loop
 
 		if firstErr != nil {
 			return nil, firstErr
@@ -390,7 +440,7 @@ func groupSummaries(summaries []string, maxSize int) [][]string {
 	return groups
 }
 
-func (s *Service) DraftMessage(o CommitOptions) (string, error) {
+func (s *Service) DraftMessage(ctx context.Context, o CommitOptions) (string, error) {
 	typeStr, _ := o.Type.String()
 	modeStr := o.Mode.String()
 	s.log().Debug("drafting commit message", "type", typeStr, "mode", modeStr)
@@ -414,11 +464,11 @@ func (s *Service) DraftMessage(o CommitOptions) (string, error) {
 			"diff_bytes", len(diff),
 			"threshold", s.ChunkThreshold,
 		)
-		result, err = s.mapReduce(diff, o)
+		result, err = s.mapReduce(ctx, diff, o)
 	} else {
 		s.progress().Status("Generating commit message...")
 		prompt := BuildCommitPrompt(diff, o)
-		result, err = s.generateWithRetry(prompt)
+		result, err = s.generateWithRetry(ctx, prompt)
 	}
 	if err != nil {
 		s.progress().Done("")
@@ -436,7 +486,7 @@ func (s *Service) DraftMessage(o CommitOptions) (string, error) {
 	return result, nil
 }
 
-func (s *Service) DraftBranchName(o BranchOptions) (string, error) {
+func (s *Service) DraftBranchName(ctx context.Context, o BranchOptions) (string, error) {
 	typeStr, _ := o.Type.String()
 	modeStr := o.Mode.String()
 	s.log().Debug("drafting branch name", "task", o.Task, "type", typeStr, "mode", modeStr)
@@ -449,7 +499,7 @@ func (s *Service) DraftBranchName(o BranchOptions) (string, error) {
 
 	s.progress().Status("Generating branch name...")
 	prompt := BuildBranchPrompt(o)
-	result, err := s.generateWithRetry(prompt)
+	result, err := s.generateWithRetry(ctx, prompt)
 	if err != nil {
 		s.progress().Done("")
 		s.log().Error("LLM generation failed", "error", err)
@@ -466,7 +516,7 @@ func (s *Service) DraftBranchName(o BranchOptions) (string, error) {
 	return result, nil
 }
 
-func (s *Service) DraftPrDescription(o PrOptions) (string, error) {
+func (s *Service) DraftPrDescription(ctx context.Context, o PrOptions) (string, error) {
 	typeStr, _ := o.Type.String()
 	modeStr := o.Mode.String()
 	s.log().Debug("drafting pr description", "source", o.SourceBranch, "destination", o.DestinationBranch, "type", typeStr, "mode", modeStr)
@@ -497,11 +547,11 @@ func (s *Service) DraftPrDescription(o PrOptions) (string, error) {
 			"commits_bytes", len(joinedCommits),
 			"threshold", s.ChunkThreshold,
 		)
-		result, err = s.mapReducePr(commits, o)
+		result, err = s.mapReducePr(ctx, commits, o)
 	} else {
 		s.progress().Status("Generating PR description...")
 		prompt := BuildPrPrompt(commits, o)
-		result, err = s.generateWithRetry(prompt)
+		result, err = s.generateWithRetry(ctx, prompt)
 		if err == nil {
 			result = sanitize(result)
 		}

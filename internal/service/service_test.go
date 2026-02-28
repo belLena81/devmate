@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -29,7 +30,7 @@ type fakeLLM struct {
 	onGenerate func(string)
 }
 
-func (f *fakeLLM) Generate(prompt string) (string, error) {
+func (f *fakeLLM) Generate(_ context.Context, prompt string) (string, error) {
 	f.mu.Lock()
 	cb := f.onGenerate
 	f.mu.Unlock()
@@ -96,7 +97,7 @@ func TestCommitService_DraftsMessage(t *testing.T) {
 
 	opts := CommitOptions{}
 
-	msg, err := svc.DraftMessage(opts)
+	msg, err := svc.DraftMessage(context.Background(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +127,7 @@ func TestCommitService_PassesDiffToLLM(t *testing.T) {
 
 	opts := CommitOptions{}
 
-	_, _ = svc.DraftMessage(opts)
+	_, _ = svc.DraftMessage(context.Background(), opts)
 
 	if !strings.Contains(receivedPrompt, "STAGED DIFF") {
 		t.Fatal("diff not included in prompt")
@@ -152,7 +153,7 @@ func TestCommitService_GitError(t *testing.T) {
 
 	opts := CommitOptions{}
 
-	_, err := svc.DraftMessage(opts)
+	_, err := svc.DraftMessage(context.Background(), opts)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -164,7 +165,7 @@ func TestBranchService_DraftsBranchName(t *testing.T) {
 		Log: noopLogger(),
 	}
 	opts := BranchOptions{Task: "add authentication"}
-	result, err := svc.DraftBranchName(opts)
+	result, err := svc.DraftBranchName(context.Background(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +180,7 @@ func TestBranchService_PassesTaskToLLM(t *testing.T) {
 		LLM: &fakeLLM{onGenerate: func(p string) { received = p }},
 		Log: noopLogger(),
 	}
-	svc.DraftBranchName(BranchOptions{Task: "fix login bug"})
+	svc.DraftBranchName(context.Background(), BranchOptions{Task: "fix login bug"})
 	if !strings.Contains(received, "fix login bug") {
 		t.Errorf("task not in prompt, got: %q", received)
 	}
@@ -192,7 +193,7 @@ func TestPrService_DraftsPrDescription(t *testing.T) {
 		Log: noopLogger(),
 	}
 	opts := PrOptions{SourceBranch: "feature/login", DestinationBranch: "main"}
-	result, err := svc.DraftPrDescription(opts)
+	result, err := svc.DraftPrDescription(context.Background(), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +209,7 @@ func TestPrService_PassesDiffToLLM(t *testing.T) {
 		LLM: &fakeLLM{onGenerate: func(p string) { received = p }},
 		Log: noopLogger(),
 	}
-	svc.DraftPrDescription(PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
+	svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
 	if !strings.Contains(received, "- one") || !strings.Contains(received, "- two") {
 		t.Errorf("commits are not in prompt, got: %q", received)
 	}
@@ -220,7 +221,7 @@ func TestPrService_GitError(t *testing.T) {
 		LLM: &fakeLLM{},
 		Log: noopLogger(),
 	}
-	_, err := svc.DraftPrDescription(PrOptions{SourceBranch: "a", DestinationBranch: "b"})
+	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
 	if err == nil {
 		t.Fatal("expected error from git")
 	}
@@ -232,7 +233,7 @@ func TestPrService_LLMError(t *testing.T) {
 		LLM: &fakeLLM{err: errors.New("LLM failed")},
 		Log: noopLogger(),
 	}
-	_, err := svc.DraftPrDescription(PrOptions{SourceBranch: "a", DestinationBranch: "b"})
+	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
 	if err == nil {
 		t.Fatal("expected error from LLM")
 	}
@@ -244,7 +245,7 @@ func TestCommitService_LLMError(t *testing.T) {
 		LLM: &fakeLLM{err: errors.New("LLM failed")},
 		Log: noopLogger(),
 	}
-	_, err := svc.DraftMessage(CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err == nil {
 		t.Fatal("expected error from LLM")
 	}
@@ -260,7 +261,7 @@ func TestDraftMessage_SingleShot_ReportsProgress(t *testing.T) {
 		Log:      noopLogger(),
 		Progress: fp,
 	}
-	_, err := svc.DraftMessage(CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +288,7 @@ func TestDraftMessage_MapReduce_ReportsChunkProgress(t *testing.T) {
 		Progress:       fp,
 		ChunkThreshold: 500,
 	}
-	_, err := svc.DraftMessage(CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +310,7 @@ func TestDraftBranchName_ReportsProgress(t *testing.T) {
 		Log:      noopLogger(),
 		Progress: fp,
 	}
-	_, err := svc.DraftBranchName(BranchOptions{Task: "add auth"})
+	_, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: "add auth"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +330,7 @@ func TestDraftPrDescription_ReportsProgress(t *testing.T) {
 		Log:      noopLogger(),
 		Progress: fp,
 	}
-	_, err := svc.DraftPrDescription(PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
+	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +350,7 @@ func TestDraftMessage_LLMError_StillCallsDone(t *testing.T) {
 		Log:      noopLogger(),
 		Progress: fp,
 	}
-	svc.DraftMessage(CommitOptions{})
+	svc.DraftMessage(context.Background(), CommitOptions{})
 	if fp.doneCount() == 0 {
 		t.Error("expected Done to be called even on error (to clear the spinner)")
 	}
@@ -362,7 +363,7 @@ func TestDraftMessage_NilProgress_DoesNotPanic(t *testing.T) {
 		LLM: &fakeLLM{response: "msg"},
 		Log: noopLogger(),
 	}
-	_, err := svc.DraftMessage(CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

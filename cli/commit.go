@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"devmate/internal/domain"
 	"devmate/internal/service"
 	"fmt"
@@ -13,13 +14,11 @@ func NewCommit(cmdType string, short, detailed, explain bool) (service.CommitOpt
 	if err != nil {
 		return service.CommitOptions{}, err
 	}
-	return service.CommitOptions{domain.Options{ct, parseCmdMode(detailed), explain}}, nil
+	return service.CommitOptions{Options: domain.Options{Type: ct, Mode: parseCmdMode(detailed), Explain: explain}}, nil
 }
 
-var commitOpts service.CommitOptions
-
 type CommitService interface {
-	DraftMessage(opt service.CommitOptions) (string, error)
+	DraftMessage(ctx context.Context, opt service.CommitOptions) (string, error)
 }
 
 func newCommitCmd(a *App) *cobra.Command {
@@ -27,13 +26,11 @@ func newCommitCmd(a *App) *cobra.Command {
 	var explain, rawShort, rawDetailed bool
 
 	validateAndRunCommit := func(cmd *cobra.Command, args []string) error {
-		//validate type and prepare options
-		var err error
-		commitOpts, err = NewCommit(rawCmdType, rawShort, rawDetailed, explain)
+		commitOpts, err := NewCommit(rawCmdType, rawShort, rawDetailed, explain)
 		if err != nil {
 			return err
 		}
-		msg, err := a.commitService.DraftMessage(commitOpts)
+		msg, err := a.commitService.DraftMessage(cmd.Context(), commitOpts)
 		if err != nil {
 			return err
 		}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -18,7 +19,7 @@ type countingLLM struct {
 	response  string
 }
 
-func (c *countingLLM) Generate(prompt string) (string, error) {
+func (c *countingLLM) Generate(_ context.Context, prompt string) (string, error) {
 	n := c.calls.Add(1)
 	if n <= c.failTimes {
 		return "", fmt.Errorf("transient error on attempt %d", n)
@@ -46,7 +47,7 @@ func TestDraftPrDescription_ChunkedCommits_UsesMapReduce(t *testing.T) {
 		ChunkThreshold: 100,
 	}
 
-	result, err := svc.DraftPrDescription(PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
+	result, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +72,7 @@ func TestDraftPrDescription_SmallCommits_SingleLLMCall(t *testing.T) {
 		ChunkThreshold: 1000,
 	}
 
-	result, err := svc.DraftPrDescription(PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
+	result, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +93,7 @@ func TestDraftPrDescription_ReturnsResultAfterSingleCall(t *testing.T) {
 		Log: noopLogger(),
 	}
 
-	result, err := svc.DraftPrDescription(PrOptions{SourceBranch: "feature/login", DestinationBranch: "main"})
+	result, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/login", DestinationBranch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +110,7 @@ func TestDraftPrDescription_LLMError_StillCallsDone(t *testing.T) {
 		Log:      noopLogger(),
 		Progress: fp,
 	}
-	svc.DraftPrDescription(PrOptions{SourceBranch: "a", DestinationBranch: "b"})
+	svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
 	if fp.doneCount() == 0 {
 		t.Error("expected Done to be called even on error")
 	}
@@ -130,7 +131,7 @@ func TestDraftPrDescription_MapReduce_ReportsChunkProgress(t *testing.T) {
 		ChunkThreshold: 100,
 	}
 
-	_, err := svc.DraftPrDescription(PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
+	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,10 +169,10 @@ func TestDraftPrDescription_MapReduce_CachesResult(t *testing.T) {
 	}
 
 	opts := PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"}
-	svc.DraftPrDescription(opts) // miss
+	svc.DraftPrDescription(context.Background(), opts) // miss
 	firstCalls := llmCalls.Load()
 
-	svc.DraftPrDescription(opts) // should hit cache
+	svc.DraftPrDescription(context.Background(), opts) // should hit cache
 	if llmCalls.Load() != firstCalls {
 		t.Errorf("second call should use cache, but LLM was called again (total=%d, after_first=%d)",
 			llmCalls.Load(), firstCalls)
@@ -190,7 +191,7 @@ func TestDraftBranchName_LongTask_StillReturnsResult(t *testing.T) {
 		ChunkThreshold: DefaultChunkThreshold,
 	}
 
-	result, err := svc.DraftBranchName(BranchOptions{Task: longTask})
+	result, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: longTask})
 	if err != nil {
 		t.Fatalf("unexpected error for long task: %v", err)
 	}
@@ -206,7 +207,7 @@ func TestDraftBranchName_LLMError_StillCallsDone(t *testing.T) {
 		Log:      noopLogger(),
 		Progress: fp,
 	}
-	svc.DraftBranchName(BranchOptions{Task: "some task"})
+	svc.DraftBranchName(context.Background(), BranchOptions{Task: "some task"})
 	if fp.doneCount() == 0 {
 		t.Error("expected Done to be called even on error")
 	}
@@ -223,7 +224,7 @@ func TestDraftMessage_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 		MaxRetries: 3,
 	}
 
-	result, err := svc.DraftMessage(CommitOptions{})
+	result, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
 		t.Fatalf("expected success after retries, got: %v", err)
 	}
@@ -244,7 +245,7 @@ func TestDraftMessage_Retry_ExhaustedReturnsError(t *testing.T) {
 		MaxRetries: 2,
 	}
 
-	_, err := svc.DraftMessage(CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err == nil {
 		t.Fatal("expected error after exhausting retries")
 	}
@@ -259,7 +260,7 @@ func TestDraftMessage_Retry_ZeroRetries_FailsImmediately(t *testing.T) {
 		MaxRetries: 0, // no retries — first failure is final
 	}
 
-	_, err := svc.DraftMessage(CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err == nil {
 		t.Fatal("expected error with 0 retries")
 	}
@@ -277,7 +278,7 @@ func TestDraftPrDescription_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 		MaxRetries: 2,
 	}
 
-	result, err := svc.DraftPrDescription(PrOptions{SourceBranch: "a", DestinationBranch: "b"})
+	result, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
 	if err != nil {
 		t.Fatalf("expected success after retry, got: %v", err)
 	}
@@ -294,7 +295,7 @@ func TestDraftBranchName_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 		MaxRetries: 2,
 	}
 
-	result, err := svc.DraftBranchName(BranchOptions{Task: "add authentication"})
+	result, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: "add authentication"})
 	if err != nil {
 		t.Fatalf("expected success after retry, got: %v", err)
 	}
@@ -311,7 +312,7 @@ func TestDraftBranchName_Retry_ExhaustedReturnsError(t *testing.T) {
 		MaxRetries: 2,
 	}
 
-	_, err := svc.DraftBranchName(BranchOptions{Task: "some task"})
+	_, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: "some task"})
 	if err == nil {
 		t.Fatal("expected error after exhausting retries")
 	}
@@ -326,7 +327,7 @@ func TestDraftPrDescription_Retry_ExhaustedReturnsError(t *testing.T) {
 		MaxRetries: 2,
 	}
 
-	_, err := svc.DraftPrDescription(PrOptions{SourceBranch: "a", DestinationBranch: "b"})
+	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
 	if err == nil {
 		t.Fatal("expected error after exhausting retries")
 	}

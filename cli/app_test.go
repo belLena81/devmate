@@ -6,6 +6,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"devmate/cli"
 	"devmate/internal/domain"
 	"devmate/internal/service"
@@ -25,7 +26,7 @@ type stubLLM struct {
 	err      error
 }
 
-func (s *stubLLM) Generate(string) (string, error) { return s.response, s.err }
+func (s *stubLLM) Generate(_ context.Context, _ string) (string, error) { return s.response, s.err }
 
 // spyCommitService captures the options passed to DraftMessage.
 type spyCommitService struct {
@@ -34,7 +35,7 @@ type spyCommitService struct {
 	err          error
 }
 
-func (s *spyCommitService) DraftMessage(o service.CommitOptions) (string, error) {
+func (s *spyCommitService) DraftMessage(_ context.Context, o service.CommitOptions) (string, error) {
 	s.receivedOpts = o
 	return s.response, s.err
 }
@@ -46,7 +47,7 @@ type spyBranchService struct {
 	err          error
 }
 
-func (s *spyBranchService) DraftBranchName(o service.BranchOptions) (string, error) {
+func (s *spyBranchService) DraftBranchName(_ context.Context, o service.BranchOptions) (string, error) {
 	s.receivedOpts = o
 	return s.response, s.err
 }
@@ -58,14 +59,18 @@ type spyPrService struct {
 	err          error
 }
 
-func (s *spyPrService) DraftPrDescription(o service.PrOptions) (string, error) {
+func (s *spyPrService) DraftPrDescription(_ context.Context, o service.PrOptions) (string, error) {
 	s.receivedOpts = o
 	return s.response, s.err
 }
 
 func newApp(t *testing.T) *cli.App {
 	t.Helper()
-	return cli.NewApp(&stubLLM{})
+	app, err := cli.NewApp(&stubLLM{})
+	if err != nil {
+		t.Fatalf("NewApp: %v", err)
+	}
+	return app
 }
 
 func noopLogger() *slog.Logger {
@@ -77,7 +82,11 @@ func noopLogger() *slog.Logger {
 // ---------------------------------------------------------------------------
 
 func TestNewApp_ReturnsNonNilApp(t *testing.T) {
-	if cli.NewApp(&stubLLM{}) == nil {
+	app, err := cli.NewApp(&stubLLM{})
+	if err != nil {
+		t.Fatalf("NewApp: %v", err)
+	}
+	if app == nil {
 		t.Fatal("NewApp returned nil")
 	}
 }
@@ -94,7 +103,11 @@ func TestNewAppWithService_ReturnsNonNilApp(t *testing.T) {
 		Cache: service.NoopCache{},
 		Log:   noopLogger(),
 	}
-	if cli.NewAppWithService(svc) == nil {
+	app, err := cli.NewAppWithService(svc)
+	if err != nil {
+		t.Fatalf("NewAppWithService: %v", err)
+	}
+	if app == nil {
 		t.Fatal("NewAppWithService returned nil")
 	}
 }

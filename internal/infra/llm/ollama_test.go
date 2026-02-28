@@ -1,6 +1,7 @@
 package llm_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -70,7 +71,7 @@ func TestGenerate_ReturnsResponse(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(srv.URL)
-	got, err := c.Generate("write a commit message")
+	got, err := c.Generate(context.Background(), "write a commit message")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestGenerate_TrimsWhitespace(t *testing.T) {
 	defer srv.Close()
 
 	c := newTestClient(srv.URL)
-	got, err := c.Generate("prompt")
+	got, err := c.Generate(context.Background(), "prompt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestGenerate_SendsPOSTToGenerateEndpoint(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	newTestClient(srv.URL).Generate("prompt")
+	newTestClient(srv.URL).Generate(context.Background(), "prompt")
 
 	if gotMethod != http.MethodPost {
 		t.Errorf("expected POST, got %s", gotMethod)
@@ -126,7 +127,7 @@ func TestGenerate_SendsPromptInBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	newTestClient(srv.URL).Generate("my special prompt")
+	newTestClient(srv.URL).Generate(context.Background(), "my special prompt")
 
 	if body["prompt"] != "my special prompt" {
 		t.Errorf("expected prompt in body, got %v", body["prompt"])
@@ -141,7 +142,7 @@ func TestGenerate_SendsModelInBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	newTestClient(srv.URL).Generate("prompt")
+	newTestClient(srv.URL).Generate(context.Background(), "prompt")
 
 	if body["model"] != "test-model" {
 		t.Errorf("expected model %q in body, got %v", "test-model", body["model"])
@@ -156,7 +157,7 @@ func TestGenerate_DisablesStreaming(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	newTestClient(srv.URL).Generate("prompt")
+	newTestClient(srv.URL).Generate(context.Background(), "prompt")
 
 	stream, ok := body["stream"].(bool)
 	if !ok || stream {
@@ -172,7 +173,7 @@ func TestGenerate_SetsJSONContentType(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	newTestClient(srv.URL).Generate("prompt")
+	newTestClient(srv.URL).Generate(context.Background(), "prompt")
 
 	if !strings.HasPrefix(gotContentType, "application/json") {
 		t.Errorf("expected application/json Content-Type, got %q", gotContentType)
@@ -183,7 +184,7 @@ func TestGenerate_SetsJSONContentType(t *testing.T) {
 
 func TestGenerate_ServerUnavailable_ReturnsError(t *testing.T) {
 	c := llm.NewOllamaClient(llm.WithBaseURL("http://127.0.0.1:1")) // nothing listening
-	_, err := c.Generate("prompt")
+	_, err := c.Generate(context.Background(), "prompt")
 	if err == nil {
 		t.Fatal("expected error when server is unavailable")
 	}
@@ -195,7 +196,7 @@ func TestGenerate_Non200Status_ReturnsError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := newTestClient(srv.URL).Generate("prompt")
+	_, err := newTestClient(srv.URL).Generate(context.Background(), "prompt")
 	if err == nil {
 		t.Fatal("expected error on 404 response")
 	}
@@ -210,7 +211,7 @@ func TestGenerate_500Status_ReturnsError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := newTestClient(srv.URL).Generate("prompt")
+	_, err := newTestClient(srv.URL).Generate(context.Background(), "prompt")
 	if err == nil {
 		t.Fatal("expected error on 500 response")
 	}
@@ -223,7 +224,7 @@ func TestGenerate_MalformedJSON_ReturnsError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := newTestClient(srv.URL).Generate("prompt")
+	_, err := newTestClient(srv.URL).Generate(context.Background(), "prompt")
 	if err == nil {
 		t.Fatal("expected error on malformed JSON response")
 	}
@@ -235,7 +236,7 @@ func TestGenerate_EmptyResponseField_ReturnsEmptyString(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := newTestClient(srv.URL).Generate("prompt")
+	got, err := newTestClient(srv.URL).Generate(context.Background(), "prompt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

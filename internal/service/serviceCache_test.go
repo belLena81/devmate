@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -48,7 +49,7 @@ func TestDraftMessage_CacheMiss_CallsLLMAndStores(t *testing.T) {
 		Log:   noopLogger(),
 	}
 
-	result, err := svc.DraftMessage(CommitOptions{})
+	result, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -71,8 +72,8 @@ func TestDraftMessage_CacheHit_DoesNotCallLLM(t *testing.T) {
 		Log:   noopLogger(),
 	}
 
-	svc.DraftMessage(CommitOptions{})                // miss — populates cache
-	result, err := svc.DraftMessage(CommitOptions{}) // hit
+	svc.DraftMessage(context.Background(), CommitOptions{})                // miss — populates cache
+	result, err := svc.DraftMessage(context.Background(), CommitOptions{}) // hit
 	if err != nil {
 		t.Fatalf("unexpected error on cache hit: %v", err)
 	}
@@ -94,7 +95,7 @@ func TestDraftMessage_LLMError_DoesNotCache(t *testing.T) {
 		Log:   noopLogger(),
 	}
 
-	svc.DraftMessage(CommitOptions{})
+	svc.DraftMessage(context.Background(), CommitOptions{})
 	if cache.setCalls != 0 {
 		t.Errorf("must not cache on LLM error, got %d Set calls", cache.setCalls)
 	}
@@ -111,8 +112,8 @@ func TestDraftMessage_DifferentMode_IndependentCacheEntries(t *testing.T) {
 		Log:   noopLogger(),
 	}
 
-	svc.DraftMessage(CommitOptions{Options: domain.Options{Mode: domain.Short}})
-	svc.DraftMessage(CommitOptions{Options: domain.Options{Mode: domain.Detailed}})
+	svc.DraftMessage(context.Background(), CommitOptions{Options: domain.Options{Mode: domain.Short}})
+	svc.DraftMessage(context.Background(), CommitOptions{Options: domain.Options{Mode: domain.Detailed}})
 
 	if llmCalls != 2 {
 		t.Errorf("different modes must have independent cache entries, LLM called %d times", llmCalls)
@@ -133,8 +134,8 @@ func TestDraftMessage_DifferentDiff_IndependentCacheEntries(t *testing.T) {
 		}
 	}
 
-	makeService("diff A").DraftMessage(CommitOptions{})
-	makeService("diff B").DraftMessage(CommitOptions{})
+	makeService("diff A").DraftMessage(context.Background(), CommitOptions{})
+	makeService("diff B").DraftMessage(context.Background(), CommitOptions{})
 
 	if llmCalls != 2 {
 		t.Errorf("different diffs must have independent cache entries, LLM called %d times", llmCalls)
@@ -152,7 +153,7 @@ func TestDraftBranchName_CacheMiss_CallsLLMAndStores(t *testing.T) {
 		Log:   noopLogger(),
 	}
 
-	result, err := svc.DraftBranchName(BranchOptions{Task: "add authentication"})
+	result, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: "add authentication"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -175,8 +176,8 @@ func TestDraftBranchName_CacheHit_DoesNotCallLLM(t *testing.T) {
 	}
 
 	opts := BranchOptions{Task: "add authentication"}
-	svc.DraftBranchName(opts)
-	svc.DraftBranchName(opts)
+	svc.DraftBranchName(context.Background(), opts)
+	svc.DraftBranchName(context.Background(), opts)
 
 	if llmCalls != 1 {
 		t.Errorf("LLM should be called once, got %d", llmCalls)
@@ -192,7 +193,7 @@ func TestDraftBranchName_LLMError_DoesNotCache(t *testing.T) {
 		Log:   noopLogger(),
 	}
 
-	svc.DraftBranchName(BranchOptions{Task: "some task"})
+	svc.DraftBranchName(context.Background(), BranchOptions{Task: "some task"})
 	if cache.setCalls != 0 {
 		t.Errorf("must not cache on LLM error, got %d Set calls", cache.setCalls)
 	}
@@ -210,7 +211,7 @@ func TestDraftPrDescription_CacheMiss_CallsLLMAndStores(t *testing.T) {
 		Log:   noopLogger(),
 	}
 
-	_, err := svc.DraftPrDescription(PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
+	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -231,8 +232,8 @@ func TestDraftPrDescription_CacheHit_DoesNotCallLLM(t *testing.T) {
 	}
 
 	opts := PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"}
-	svc.DraftPrDescription(opts)
-	svc.DraftPrDescription(opts)
+	svc.DraftPrDescription(context.Background(), opts)
+	svc.DraftPrDescription(context.Background(), opts)
 
 	if llmCalls != 1 {
 		t.Errorf("LLM should be called once, got %d", llmCalls)
@@ -249,7 +250,7 @@ func TestDraftPrDescription_LLMError_DoesNotCache(t *testing.T) {
 		Log:   noopLogger(),
 	}
 
-	svc.DraftPrDescription(PrOptions{SourceBranch: "a", DestinationBranch: "b"})
+	svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
 	if cache.setCalls != 0 {
 		t.Errorf("must not cache on LLM error, got %d Set calls", cache.setCalls)
 	}
@@ -270,10 +271,12 @@ func TestDraftPrDescription_NewCommitAdded_CacheMiss(t *testing.T) {
 	}
 
 	makeService([]string{"feat: one", "feat: two"}).DraftPrDescription(
+		context.Background(),
 		PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"},
 	)
 	// A new commit was added — different input, must miss.
 	makeService([]string{"feat: one", "feat: two", "feat: three"}).DraftPrDescription(
+		context.Background(),
 		PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"},
 	)
 
@@ -297,8 +300,8 @@ func TestCache_CommitAndBranch_DoNotShareEntries(t *testing.T) {
 		Log:   noopLogger(),
 	}
 
-	svc.DraftMessage(CommitOptions{})
-	svc.DraftBranchName(BranchOptions{Task: "content"})
+	svc.DraftMessage(context.Background(), CommitOptions{})
+	svc.DraftBranchName(context.Background(), BranchOptions{Task: "content"})
 
 	if llmCalls != 2 {
 		t.Errorf("commit and branch must have independent cache namespaces, LLM called %d times", llmCalls)

@@ -29,9 +29,7 @@ func main() {
 	ollamaClient := llm.NewOllamaClientFromConfig(llm.ClientConfig{
 		BaseURL:        cfg.Ollama.BaseURL,
 		Model:          cfg.Ollama.Model,
-		HTTPMaxRetries: cfg.Ollama.HTTPMaxRetries,
 		RequestTimeout: cfg.Ollama.RequestTimeout(),
-		RetryBaseDelay: cfg.Ollama.RetryBaseDelay(),
 	}, llm.WithLogger(log))
 
 	cache := buildCache(cfg.Cache.Dir, log)
@@ -42,8 +40,14 @@ func main() {
 	svc.ChunkThreshold = cfg.Service.ChunkThreshold
 	svc.MaxConcurrency = cfg.Service.MaxConcurrency
 	svc.MaxRetries = cfg.Service.MaxRetries
+	svc.RetryBaseDelay = cfg.Service.RetryBaseDelay()
 
-	app := cli.NewAppWithService(svc)
+	app, err := cli.NewAppWithService(svc)
+	if err != nil {
+		log.Error("failed to initialise application", "error", err)
+		os.Exit(1)
+	}
+
 	if err := app.Execute(); err != nil {
 		os.Exit(1)
 	}

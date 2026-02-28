@@ -4,7 +4,10 @@ package cli
 // _test.go files. None of these symbols are exported; they are
 // package-internal test utilities compiled only during `go test`.
 
-import "devmate/internal/service"
+import (
+	"context"
+	"devmate/internal/service"
+)
 
 // fakeCommitService is a test double for CommitService. It records the options
 // it was called with so tests can assert on them, and it returns a configured
@@ -15,7 +18,7 @@ type fakeCommitService struct {
 	options  service.CommitOptions
 }
 
-func (f *fakeCommitService) DraftMessage(o service.CommitOptions) (string, error) {
+func (f *fakeCommitService) DraftMessage(ctx context.Context, o service.CommitOptions) (string, error) {
 	f.options = o
 	return f.response, f.err
 }
@@ -26,7 +29,7 @@ type fakeBranchService struct {
 	options  service.BranchOptions
 }
 
-func (f *fakeBranchService) DraftBranchName(o service.BranchOptions) (string, error) {
+func (f *fakeBranchService) DraftBranchName(ctx context.Context, o service.BranchOptions) (string, error) {
 	f.options = o
 	return f.response, f.err
 }
@@ -37,7 +40,7 @@ type fakePrService struct {
 	options  service.PrOptions
 }
 
-func (f *fakePrService) DraftPrDescription(o service.PrOptions) (string, error) {
+func (f *fakePrService) DraftPrDescription(ctx context.Context, o service.PrOptions) (string, error) {
 	f.options = o
 	return f.response, f.err
 }

@@ -4,8 +4,8 @@ import (
 	"devmate/internal/domain"
 	"devmate/internal/infra/git"
 	"devmate/internal/service"
+	"fmt"
 	"log/slog"
-	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -20,18 +20,18 @@ type App struct {
 // NewApp constructs the CLI application wired to the given LLM.
 // The git runner is resolved from the working directory.
 // Caching is disabled — use NewAppWithService for full wiring including cache.
-func NewApp(llm domain.LLM) *App {
+func NewApp(llm domain.LLM) (*App, error) {
 	svc := service.New(nil, llm, service.NoopCache{}, "", slog.Default())
 	return newAppFromService(svc)
 }
 
 // NewAppWithService constructs the CLI application from a fully wired service.
 // This is the production path used by main.go (includes cache and model name).
-func NewAppWithService(svc *service.Service) *App {
+func NewAppWithService(svc *service.Service) (*App, error) {
 	return newAppFromService(svc)
 }
 
-func newAppFromService(svc *service.Service) *App {
+func newAppFromService(svc *service.Service) (*App, error) {
 	// Reuse the logger already configured on the service (respects the log
 	// level from config). Fall back to slog.Default() only when svc.Log is
 	// nil, which happens in tests that build a bare service without a logger.
@@ -43,7 +43,7 @@ func newAppFromService(svc *service.Service) *App {
 	repoRoot, err := git.RepoRoot()
 	if err != nil {
 		log.Error("failed to find git repo root", "error", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("not inside a git repository: %w", err)
 	}
 	svc.Git = git.New(repoRoot, log)
 
@@ -53,7 +53,7 @@ func newAppFromService(svc *service.Service) *App {
 		prService:     svc,
 	}
 	app.rootCmd = buildRootCmd(app)
-	return app
+	return app, nil
 }
 
 func (a *App) Execute() error {

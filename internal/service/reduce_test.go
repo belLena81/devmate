@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -88,7 +89,7 @@ func TestReduceSummaries_SmallEnough_NoLLMCalls(t *testing.T) {
 	}
 
 	summaries := []string{"- change A", "- change B"}
-	result, err := svc.reduceSummaries(summaries)
+	result, err := svc.reduceSummaries(context.Background(), summaries)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +118,7 @@ func TestReduceSummaries_LargeSummaries_ReducedViaLLM(t *testing.T) {
 		summaries[i] = fmt.Sprintf("- change %s", strings.Repeat("x", 90))
 	}
 
-	result, err := svc.reduceSummaries(summaries)
+	result, err := svc.reduceSummaries(context.Background(), summaries)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +148,7 @@ func TestReduceSummaries_LLMError_Propagated(t *testing.T) {
 		strings.Repeat("c", 40),
 	}
 
-	_, err := svc.reduceSummaries(summaries)
+	_, err := svc.reduceSummaries(context.Background(), summaries)
 	if err == nil {
 		t.Fatal("expected error to propagate from LLM")
 	}
@@ -164,7 +165,7 @@ func TestReduceSummaries_SingleSummary_PassedThrough(t *testing.T) {
 	}
 
 	summaries := []string{"- only one summary that is quite long"}
-	result, err := svc.reduceSummaries(summaries)
+	result, err := svc.reduceSummaries(context.Background(), summaries)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +201,7 @@ func TestMapReduce_LargeDiff_SummariesReduced(t *testing.T) {
 		Log:            noopLogger(),
 	}
 
-	_, err := svc.DraftMessage(CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +301,7 @@ func TestMapReduce_ChunksProcessedInParallel(t *testing.T) {
 		Log:            noopLogger(),
 	}
 
-	_, err := svc.DraftMessage(CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,7 +359,7 @@ func TestMapReduce_ConcurrencyLimiterCapsInFlight(t *testing.T) {
 		Log:            noopLogger(),
 	}
 
-	_, err := svc.DraftMessage(CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +409,7 @@ func TestMapReduce_PreservesChunkOrder(t *testing.T) {
 		Log:            noopLogger(),
 	}
 
-	_, err := svc.DraftMessage(CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +443,7 @@ func TestMapReduce_PartialChunkError_ReturnsError(t *testing.T) {
 		Log:            noopLogger(),
 	}
 
-	_, err := svc.DraftMessage(CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err == nil {
 		t.Fatal("expected error when a chunk fails")
 	}

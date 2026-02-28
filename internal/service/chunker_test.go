@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"devmate/internal/domain"
 	"fmt"
 	"strings"
@@ -84,7 +85,7 @@ func TestDraftMessage_LargeDiff_UsesMapReduce(t *testing.T) {
 		ChunkThreshold: 500, // inject threshold so test controls it
 	}
 
-	_, err := svc.DraftMessage(CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
