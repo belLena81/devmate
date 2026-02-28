@@ -13,6 +13,87 @@ import (
 	"time"
 )
 
+// parallelResult carries the ordered output of one parallel task.
+type parallelResult[T any] struct {
+	idx int
+	val T
+	err error
+}
+
+// parallelDo runs fn on each element of tasks concurrently with at most
+// maxWorkers goroutines alive at once (worker-pool pattern). Results are
+// returned in the original order. On the first error, remaining queued tasks
+// are abandoned via context cancellation.
+//
+// This replaces the previous fan-out pattern that spawned len(tasks) goroutines
+// up-front and used a semaphore to gate execution. With n=100 and concurrency=2,
+// the old pattern kept 98 blocked goroutines in memory; this keeps exactly 2.
+func parallelDo[In, Out any](
+	ctx context.Context,
+	maxWorkers int,
+	tasks []In,
+	fn func(ctx context.Context, idx int, in In) (Out, error),
+) ([]Out, error) {
+	n := len(tasks)
+	if n == 0 {
+		return nil, nil
+	}
+
+	workers := min(n, maxWorkers)
+
+	// Pre-fill a buffered work channel so workers never block on send.
+	work := make(chan int, n)
+	for i := range tasks {
+		work <- i
+	}
+	close(work)
+
+	results := make(chan parallelResult[Out], n)
+
+	cancelCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for idx := range work {
+				if cancelCtx.Err() != nil {
+					return
+				}
+				out, err := fn(cancelCtx, idx, tasks[idx])
+				results <- parallelResult[Out]{idx: idx, val: out, err: err}
+				if err != nil {
+					cancel() // signal remaining workers to stop
+					return
+				}
+			}
+		}()
+	}
+
+	// Close results as soon as all workers finish so the collector loop below exits.
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	out := make([]Out, n)
+	for r := range results {
+		if r.err != nil {
+			// Drain remaining in-flight results so blocked workers can send
+			// and exit; we discard them since we're returning an error.
+			go func() {
+				for range results {
+				}
+			}()
+			return nil, r.err
+		}
+		out[r.idx] = r.val
+	}
+	return out, nil
+}
+
 type Service struct {
 	Git            domain.GitClient
 	LLM            domain.LLM
@@ -223,82 +304,30 @@ func (s *Service) mapReduce(ctx context.Context, diff string, options CommitOpti
 // summarizeChunksParallel sends all chunk prompts to the LLM concurrently
 // (up to s.concurrency() at a time) and returns the summaries in their
 // original order. It returns the first error encountered (if any).
-//
-// ctx is the parent context supplied by the public Draft* method. A derived
-// cancellation context is used internally so that the first chunk error aborts
-// all sibling goroutines that have not yet acquired the semaphore.
 func (s *Service) summarizeChunksParallel(ctx context.Context, chunks []Chunk) ([]string, error) {
 	n := len(chunks)
-	summaries := make([]string, n)
-	sem := make(chan struct{}, s.concurrency())
 	var completed atomic.Int64
-
-	// cancelCtx is cancelled as soon as any chunk fails so remaining
-	// goroutines waiting on the semaphore abort instead of sending more
-	// requests to Ollama.
-	cancelCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	var (
-		wg       sync.WaitGroup
-		mu       sync.Mutex
-		firstErr error
-	)
-
 	s.progress().Status(fmt.Sprintf("Summarizing chunk 0/%d...", n))
 
-	wg.Add(n)
-	for i, chunk := range chunks {
-		go func(idx int, ch Chunk) {
-			defer wg.Done()
-
-			// Abort before acquiring a slot if a sibling already failed
-			// or the parent context was cancelled.
-			select {
-			case sem <- struct{}{}:
-			case <-cancelCtx.Done():
-				return
-			}
-			defer func() { <-sem }()
-
+	return parallelDo(ctx, s.concurrency(), chunks,
+		func(ctx context.Context, idx int, ch Chunk) (string, error) {
 			s.log().Debug("summarizing chunk",
-				"chunk", idx+1,
-				"of", n,
-				"files", ch.Files,
-				"bytes", len(ch.Content),
+				"chunk", idx+1, "of", n,
+				"files", ch.Files, "bytes", len(ch.Content),
 			)
-
 			prompt := BuildChunkPrompt(ch.Content, idx+1, n)
-			summary, err := s.generateWithRetry(cancelCtx, prompt)
+			summary, err := s.generateWithRetry(ctx, prompt)
 			if err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = fmt.Errorf("%w: chunk %d: %w", domain.ErrChunkFailed, idx+1, err)
-					cancel() // signal all waiting goroutines to stop
-				}
-				mu.Unlock()
-				return
+				return "", fmt.Errorf("%w: chunk %d: %w", domain.ErrChunkFailed, idx+1, err)
 			}
-
 			done := completed.Add(1)
 			s.progress().Status(fmt.Sprintf("Summarizing chunk %d/%d...", done, n))
-
 			s.log().Debug("chunk summary received",
-				"chunk", idx+1,
-				"files", ch.Files,
-				"summary", summary,
+				"chunk", idx+1, "files", ch.Files, "summary", summary,
 			)
-
-			summaries[idx] = summary
-		}(i, chunk)
-	}
-
-	wg.Wait()
-
-	if firstErr != nil {
-		return nil, firstErr
-	}
-	return summaries, nil
+			return summary, nil
+		},
+	)
 }
 
 // reduceSummaries iteratively condenses summaries in groups until their
@@ -319,73 +348,31 @@ func (s *Service) reduceSummaries(ctx context.Context, summaries []string) ([]st
 		)
 
 		groups := groupSummaries(summaries, s.ChunkThreshold)
-		reduced := make([]string, len(groups))
-		sem := make(chan struct{}, s.concurrency())
 		var reduceCompleted atomic.Int64
-
-		// cancelCtx is scoped to this single reduce pass — it is cancelled
-		// (via the explicit cancel() call below) at the end of each iteration,
-		// not deferred to function exit. This avoids the defer-in-loop pitfall
-		// where deferred cancels stack up until reduceSummaries returns.
-		cancelCtx, cancel := context.WithCancel(ctx)
-
 		s.progress().Status(fmt.Sprintf("Reducing summaries: group 0/%d...", len(groups)))
 
-		var (
-			wg       sync.WaitGroup
-			mu       sync.Mutex
-			firstErr error
-		)
-
-		for i, group := range groups {
-			// Single-item groups don't need an LLM call — pass through.
-			if len(group) == 1 {
-				reduced[i] = group[0]
-				continue
-			}
-
-			wg.Add(1)
-			go func(idx int, grp []string) {
-				defer wg.Done()
-
-				select {
-				case sem <- struct{}{}:
-				case <-cancelCtx.Done():
-					return
+		reduced, err := parallelDo(ctx, s.concurrency(), groups,
+			func(ctx context.Context, idx int, grp []string) (string, error) {
+				if len(grp) == 1 {
+					return grp[0], nil
 				}
-				defer func() { <-sem }()
-
 				s.log().Debug("reducing summary group",
-					"group", idx+1,
-					"of", len(groups),
-					"items", len(grp),
+					"group", idx+1, "of", len(groups), "items", len(grp),
 				)
-
 				prompt := BuildReducePrompt(grp)
-				condensed, err := s.generateWithRetry(cancelCtx, prompt)
+				condensed, err := s.generateWithRetry(ctx, prompt)
 				if err != nil {
-					mu.Lock()
-					if firstErr == nil {
-						firstErr = fmt.Errorf("%w: group %d: %w", domain.ErrReduceFailed, idx+1, err)
-						cancel()
-					}
-					mu.Unlock()
-					return
+					return "", fmt.Errorf("%w: group %d: %w", domain.ErrReduceFailed, idx+1, err)
 				}
 				done := reduceCompleted.Add(1)
 				s.progress().Status(fmt.Sprintf("Reducing summaries: group %d/%d...", done, len(groups)))
-				reduced[idx] = condensed
-			}(i, group)
+				return condensed, nil
+			},
+		)
+		if err != nil {
+			return nil, err
 		}
 
-		wg.Wait()
-		cancel() // always cancel the per-iteration context before the next loop
-
-		if firstErr != nil {
-			return nil, firstErr
-		}
-
-		// Safety: if reduction made no progress, stop to avoid infinite loop.
 		if len(reduced) >= len(summaries) {
 			s.log().Debug("reduction made no progress, proceeding with current summaries",
 				"before", len(summaries), "after", len(reduced))
