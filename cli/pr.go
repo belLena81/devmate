@@ -51,7 +51,7 @@ func newPrCmd(a *App) *cobra.Command {
 		return nil
 	}
 	prCmd := &cobra.Command{
-		Use:   "pr [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] [--no-cache] target source",
+		Use:   "pr [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] [--no-cache] source target",
 		Short: "Create a pr text from git log between heads given branch names",
 		Long: `Generates pull request title and description from the git log between two branches.
 
