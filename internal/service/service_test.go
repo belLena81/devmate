@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"devmate/internal/domain"
 	"errors"
 	"io"
 	"log/slog"
@@ -366,5 +367,17 @@ func TestDraftMessage_NilProgress_DoesNotPanic(t *testing.T) {
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPrService_EmptyCommits_ReturnsErrEmptyPR(t *testing.T) {
+	svc := Service{
+		Git: &fakeGit{commits: []string{}},
+		LLM: &fakeLLM{},
+		Log: noopLogger(),
+	}
+	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
+	if !errors.Is(err, domain.ErrEmptyPR) {
+		t.Errorf("expected ErrEmptyPR when no commits exist between branches, got %v", err)
 	}
 }

@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-// Service orchestrates git data retrieval, caching, and LLM generation.
 type Service struct {
 	Git            domain.GitClient
 	LLM            domain.LLM
@@ -134,7 +133,7 @@ func (s *Service) generateWithRetry(ctx context.Context, prompt string) (string,
 	}
 
 	// Unreachable, but satisfies the compiler.
-	return "", fmt.Errorf("LLM generate: no attempts made")
+	return "", domain.ErrLLMNoAttempts
 }
 
 type CommitOptions struct {
@@ -274,7 +273,7 @@ func (s *Service) summarizeChunksParallel(ctx context.Context, chunks []Chunk) (
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
-					firstErr = fmt.Errorf("summarizing chunk %d: %w", idx+1, err)
+					firstErr = fmt.Errorf("%w: chunk %d: %w", domain.ErrChunkFailed, idx+1, err)
 					cancel() // signal all waiting goroutines to stop
 				}
 				mu.Unlock()
@@ -367,7 +366,7 @@ func (s *Service) reduceSummaries(ctx context.Context, summaries []string) ([]st
 				if err != nil {
 					mu.Lock()
 					if firstErr == nil {
-						firstErr = fmt.Errorf("reducing summary group %d: %w", idx+1, err)
+						firstErr = fmt.Errorf("%w: group %d: %w", domain.ErrReduceFailed, idx+1, err)
 						cancel()
 					}
 					mu.Unlock()

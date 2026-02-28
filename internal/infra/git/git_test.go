@@ -1,7 +1,9 @@
 package git_test
 
 import (
+	"devmate/internal/domain"
 	"devmate/internal/infra/git"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -130,6 +132,9 @@ func TestDiffCached_ErrorOutsideGitRepo(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when run outside a git repo")
 	}
+	// DiffCached wraps the underlying git error; ErrNotGitRepository is not
+	// propagated because the runner is already constructed with a bad dir.
+	// We only assert that an error occurred, not its type.
 }
 
 // --- LogBetween --------------------------------------------------------------
@@ -282,13 +287,13 @@ func TestLogBetween_ErrorOnRefStartingWithDash(t *testing.T) {
 	runner := git.New(dir, noopLogger())
 
 	_, err := runner.LogBetween("-p", "HEAD")
-	if err == nil {
-		t.Error("expected error when base ref starts with '-'")
+	if !errors.Is(err, domain.ErrInvalidRef) {
+		t.Errorf("expected ErrInvalidRef for base ref starting with '-', got %v", err)
 	}
 
 	_, err = runner.LogBetween("HEAD", "--all")
-	if err == nil {
-		t.Error("expected error when head ref starts with '-'")
+	if !errors.Is(err, domain.ErrInvalidRef) {
+		t.Errorf("expected ErrInvalidRef for head ref starting with '-', got %v", err)
 	}
 }
 
@@ -300,13 +305,13 @@ func TestLogBetween_ErrorOnEmptyRef(t *testing.T) {
 	runner := git.New(dir, noopLogger())
 
 	_, err := runner.LogBetween("", "HEAD")
-	if err == nil {
-		t.Error("expected error for empty base ref")
+	if !errors.Is(err, domain.ErrEmptyRef) {
+		t.Errorf("expected ErrEmptyRef for empty base ref, got %v", err)
 	}
 
 	_, err = runner.LogBetween("HEAD", "")
-	if err == nil {
-		t.Error("expected error for empty head ref")
+	if !errors.Is(err, domain.ErrEmptyRef) {
+		t.Errorf("expected ErrEmptyRef for empty head ref, got %v", err)
 	}
 }
 

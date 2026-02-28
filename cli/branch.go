@@ -15,7 +15,7 @@ func NewBranch(task string, cmdType string, short, detailed, explain bool) (serv
 		return service.BranchOptions{}, err
 	}
 	if task == "" {
-		return service.BranchOptions{}, domain.MissingTaskDescription
+		return service.BranchOptions{}, domain.ErrMissingTaskDescription
 	}
 	return service.BranchOptions{Task: task, Options: domain.Options{Type: ct, Mode: parseCmdMode(detailed), Explain: explain}}, nil
 }
@@ -35,7 +35,7 @@ func newBranchCmd(a *App) *cobra.Command {
 		}
 		if a.branchService == nil {
 			// real construction — wired once you have infra ready
-			return domain.ServiceNotInitialized
+			return domain.ErrServiceNotInitialized
 		}
 		msg, err := a.branchService.DraftBranchName(cmd.Context(), branchOpts)
 		if err != nil {

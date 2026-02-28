@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"devmate/internal/domain"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -149,11 +151,8 @@ func TestReduceSummaries_LLMError_Propagated(t *testing.T) {
 	}
 
 	_, err := svc.reduceSummaries(context.Background(), summaries)
-	if err == nil {
-		t.Fatal("expected error to propagate from LLM")
-	}
-	if !strings.Contains(err.Error(), "reducing summary group") {
-		t.Errorf("unexpected error message: %v", err)
+	if !errors.Is(err, domain.ErrReduceFailed) {
+		t.Errorf("expected ErrReduceFailed, got %v", err)
 	}
 }
 
@@ -444,10 +443,7 @@ func TestMapReduce_PartialChunkError_ReturnsError(t *testing.T) {
 	}
 
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
-	if err == nil {
-		t.Fatal("expected error when a chunk fails")
-	}
-	if !strings.Contains(err.Error(), "summarizing chunk") {
-		t.Errorf("error should reference the failed chunk, got: %v", err)
+	if !errors.Is(err, domain.ErrChunkFailed) {
+		t.Errorf("expected ErrChunkFailed when a chunk fails, got %v", err)
 	}
 }

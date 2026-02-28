@@ -1,13 +1,15 @@
 package domain
 
-import "fmt"
-
+// Options bundles the user-facing flags shared by all commands.
 type Options struct {
 	Type    CmdType
 	Mode    CmdMode
 	Explain bool
 }
 
+// ─── CmdType ──────────────────────────────────────────────────────────────────
+
+// CmdType represents a conventional-commit type (feat, fix, chore, …).
 type CmdType int
 
 const (
@@ -17,9 +19,11 @@ const (
 	Chore
 	Docs
 	Refactor
-	cmdTypeSentinel // cmdTypeSentinel marks the end of the valid CmdType constants.
+	cmdTypeSentinel // marks the end of valid CmdType constants
 )
 
+// String returns the kebab-case name for the type, or ErrInvalidCmdType for
+// unknown values.
 func (t CmdType) String() (string, error) {
 	switch t {
 	case Undefined:
@@ -39,13 +43,8 @@ func (t CmdType) String() (string, error) {
 	}
 }
 
-type CmdMode int
-
-const (
-	Short CmdMode = iota
-	Detailed
-)
-
+// CmdTypeIndex maps type strings back to CmdType constants.
+// Used by CLI flag parsing to convert user input to a typed value.
 var CmdTypeIndex = func() map[string]CmdType {
 	index := make(map[string]CmdType)
 	for t := Undefined; t < cmdTypeSentinel; t++ {
@@ -55,16 +54,17 @@ var CmdTypeIndex = func() map[string]CmdType {
 	return index
 }()
 
-var cmdTypes = [5]string{"feat", "fix", "chore", "docs", "refactor"}
+// ─── CmdMode ──────────────────────────────────────────────────────────────────
 
-var ErrInvalidCmdType = fmt.Errorf("invalid commit type, must be one of %v", cmdTypes)
-var MissingTaskDescription = fmt.Errorf("missing task description")
-var MissingSourceBranch = fmt.Errorf("missing source branch")
-var MissingTargetBranch = fmt.Errorf("missing target branch")
-var BranchDoesNotExist = fmt.Errorf("branch does not exist")
-var ServiceNotInitialized = fmt.Errorf("service not initialized")
-var ErrEmptyPR = fmt.Errorf("no unique commits found between branches — nothing to describe")
+// CmdMode controls how detailed the generated output should be.
+type CmdMode int
 
+const (
+	Short    CmdMode = iota // concise single-line output (default)
+	Detailed                // expanded output with body / breakdown
+)
+
+// String returns the human-readable mode name used in prompts and cache keys.
 func (m CmdMode) String() string {
 	switch m {
 	case Detailed:

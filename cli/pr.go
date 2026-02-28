@@ -15,10 +15,10 @@ func NewPr(source, target string, cmdType string, short, detailed, explain bool)
 		return service.PrOptions{}, err
 	}
 	if source == "" {
-		return service.PrOptions{}, domain.MissingSourceBranch
+		return service.PrOptions{}, domain.ErrMissingSourceBranch
 	}
 	if target == "" {
-		return service.PrOptions{}, domain.MissingTargetBranch
+		return service.PrOptions{}, domain.ErrMissingTargetBranch
 	}
 	return service.PrOptions{
 		SourceBranch:      source,

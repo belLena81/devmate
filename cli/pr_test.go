@@ -138,14 +138,14 @@ func TestPrCmd_ValidTypes(t *testing.T) {
 
 func TestNewPr_MissingSource(t *testing.T) {
 	_, err := NewPr("", "main", "", false, false, false)
-	if !errors.Is(err, domain.MissingSourceBranch) {
+	if !errors.Is(err, domain.ErrMissingSourceBranch) {
 		t.Errorf("expected MissingSourceBranch, got %v", err)
 	}
 }
 
 func TestNewPr_MissingDestination(t *testing.T) {
 	_, err := NewPr("feature/foo", "", "", false, false, false)
-	if !errors.Is(err, domain.MissingTargetBranch) {
+	if !errors.Is(err, domain.ErrMissingTargetBranch) {
 		t.Errorf("expected MissingTargetBranch, got %v", err)
 	}
 }

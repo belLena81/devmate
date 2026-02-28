@@ -2,6 +2,7 @@ package git
 
 import (
 	"bytes"
+	"devmate/internal/domain"
 	"fmt"
 	"log/slog"
 	"os"
@@ -28,7 +29,7 @@ func New(dir string, log *slog.Logger) *Runner {
 func RepoRoot() (string, error) {
 	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
-		return "", fmt.Errorf("not inside a git repository")
+		return "", domain.ErrNotGitRepository
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -53,10 +54,10 @@ func (r *Runner) DiffCached() (string, error) {
 // This guards against option injection (refs starting with "-").
 func validRef(ref string) error {
 	if strings.HasPrefix(ref, "-") {
-		return fmt.Errorf("invalid ref %q: ref names may not start with '-'", ref)
+		return fmt.Errorf("%w %q: ref names may not start with '-'", domain.ErrInvalidRef, ref)
 	}
 	if ref == "" {
-		return fmt.Errorf("ref name must not be empty")
+		return domain.ErrEmptyRef
 	}
 	return nil
 }

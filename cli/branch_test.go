@@ -117,7 +117,7 @@ func TestBranchCmd_ValidTypes(t *testing.T) {
 
 func TestNewBranch_MissingTask(t *testing.T) {
 	_, err := NewBranch("", "", false, false, false)
-	if !errors.Is(err, domain.MissingTaskDescription) {
+	if !errors.Is(err, domain.ErrMissingTaskDescription) {
 		t.Errorf("expected MissingTaskDescription, got %v", err)
 	}
 }

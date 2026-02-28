@@ -270,13 +270,11 @@ func TestDraftPrDescription_NewCommitAdded_CacheMiss(t *testing.T) {
 		}
 	}
 
-	makeService([]string{"feat: one", "feat: two"}).DraftPrDescription(
-		context.Background(),
+	makeService([]string{"feat: one", "feat: two"}).DraftPrDescription(context.Background(),
 		PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"},
 	)
 	// A new commit was added — different input, must miss.
-	makeService([]string{"feat: one", "feat: two", "feat: three"}).DraftPrDescription(
-		context.Background(),
+	makeService([]string{"feat: one", "feat: two", "feat: three"}).DraftPrDescription(context.Background(),
 		PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"},
 	)
 

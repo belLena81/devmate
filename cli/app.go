@@ -4,7 +4,6 @@ import (
 	"devmate/internal/domain"
 	"devmate/internal/infra/git"
 	"devmate/internal/service"
-	"fmt"
 	"log/slog"
 
 	"github.com/spf13/cobra"
@@ -43,7 +42,7 @@ func newAppFromService(svc *service.Service) (*App, error) {
 	repoRoot, err := git.RepoRoot()
 	if err != nil {
 		log.Error("failed to find git repo root", "error", err)
-		return nil, fmt.Errorf("not inside a git repository: %w", err)
+		return nil, err
 	}
 	svc.Git = git.New(repoRoot, log)
 

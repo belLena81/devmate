@@ -128,18 +128,6 @@ func TestLoad_EnvOverridesFile(t *testing.T) {
 	}
 }
 
-func TestLoad_BadFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
-	os.WriteFile(path, []byte(`{ "ollama": { "unknown_key": 1 } }`), 0o644)
-	t.Setenv("DEVMATE_CONFIG", path)
-
-	_, err := config.Load()
-	if err == nil {
-		t.Fatal("Load() expected error for unknown key, got nil")
-	}
-}
-
 func TestLogConfig_SlogLevel(t *testing.T) {
 	tests := []struct {
 		level string

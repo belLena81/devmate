@@ -1,6 +1,6 @@
 package cli
 
-// helpers_test.go contains shared test doubles used across the cli package's
+// helper_test.go contains shared test doubles used across the cli package's
 // _test.go files. None of these symbols are exported; they are
 // package-internal test utilities compiled only during `go test`.
 
@@ -18,7 +18,7 @@ type fakeCommitService struct {
 	options  service.CommitOptions
 }
 
-func (f *fakeCommitService) DraftMessage(ctx context.Context, o service.CommitOptions) (string, error) {
+func (f *fakeCommitService) DraftMessage(_ context.Context, o service.CommitOptions) (string, error) {
 	f.options = o
 	return f.response, f.err
 }
@@ -29,7 +29,7 @@ type fakeBranchService struct {
 	options  service.BranchOptions
 }
 
-func (f *fakeBranchService) DraftBranchName(ctx context.Context, o service.BranchOptions) (string, error) {
+func (f *fakeBranchService) DraftBranchName(_ context.Context, o service.BranchOptions) (string, error) {
 	f.options = o
 	return f.response, f.err
 }
@@ -40,7 +40,7 @@ type fakePrService struct {
 	options  service.PrOptions
 }
 
-func (f *fakePrService) DraftPrDescription(ctx context.Context, o service.PrOptions) (string, error) {
+func (f *fakePrService) DraftPrDescription(_ context.Context, o service.PrOptions) (string, error) {
 	f.options = o
 	return f.response, f.err
 }
