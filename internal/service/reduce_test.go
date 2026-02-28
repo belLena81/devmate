@@ -82,12 +82,12 @@ func TestSummariesSize_Empty(t *testing.T) {
 func TestReduceSummaries_SmallEnough_NoLLMCalls(t *testing.T) {
 	var llmCalls atomic.Int64
 	svc := Service{
-		LLM: &fakeLLM{
+		llm: &fakeLLM{
 			onGenerate: func(string) { llmCalls.Add(1) },
 			response:   "condensed",
 		},
-		ChunkThreshold: 1000,
-		Log:            noopLogger(),
+		chunkThreshold: 1000,
+		log:            noopLogger(),
 	}
 
 	summaries := []string{"- change A", "- change B"}
@@ -106,12 +106,12 @@ func TestReduceSummaries_SmallEnough_NoLLMCalls(t *testing.T) {
 func TestReduceSummaries_LargeSummaries_ReducedViaLLM(t *testing.T) {
 	var llmCalls atomic.Int64
 	svc := Service{
-		LLM: &fakeLLM{
+		llm: &fakeLLM{
 			onGenerate: func(string) { llmCalls.Add(1) },
 			response:   "- condensed summary",
 		},
-		ChunkThreshold: 200,
-		Log:            noopLogger(),
+		chunkThreshold: 200,
+		log:            noopLogger(),
 	}
 
 	// 5 summaries of 100 bytes each = 500 bytes, well above 200 threshold
@@ -134,11 +134,11 @@ func TestReduceSummaries_LargeSummaries_ReducedViaLLM(t *testing.T) {
 
 func TestReduceSummaries_LLMError_Propagated(t *testing.T) {
 	svc := Service{
-		LLM: &fakeLLM{
+		llm: &fakeLLM{
 			err: fmt.Errorf("LLM failed"),
 		},
-		ChunkThreshold: 100,
-		Log:            noopLogger(),
+		chunkThreshold: 100,
+		log:            noopLogger(),
 	}
 
 	// Each summary is 40 bytes — two fit within the 100-byte threshold as one
@@ -158,9 +158,9 @@ func TestReduceSummaries_LLMError_Propagated(t *testing.T) {
 
 func TestReduceSummaries_SingleSummary_PassedThrough(t *testing.T) {
 	svc := Service{
-		LLM:            &fakeLLM{response: "should not be called"},
-		ChunkThreshold: 10, // threshold smaller than the summary
-		Log:            noopLogger(),
+		llm:            &fakeLLM{response: "should not be called"},
+		chunkThreshold: 10, // threshold smaller than the summary
+		log:            noopLogger(),
 	}
 
 	summaries := []string{"- only one summary that is quite long"}
@@ -186,8 +186,8 @@ func TestMapReduce_LargeDiff_SummariesReduced(t *testing.T) {
 	var mu sync.Mutex
 	prompts := make([]string, 0)
 	svc := Service{
-		Git: &fakeGit{diff: diff.String()},
-		LLM: &fakeLLM{
+		git: &fakeGit{diff: diff.String()},
+		llm: &fakeLLM{
 			onGenerate: func(p string) {
 				callCount.Add(1)
 				mu.Lock()
@@ -196,8 +196,8 @@ func TestMapReduce_LargeDiff_SummariesReduced(t *testing.T) {
 			},
 			response: "- " + strings.Repeat("summary ", 10),
 		},
-		ChunkThreshold: 500,
-		Log:            noopLogger(),
+		chunkThreshold: 500,
+		log:            noopLogger(),
 	}
 
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
@@ -293,11 +293,11 @@ func TestMapReduce_ChunksProcessedInParallel(t *testing.T) {
 	}()
 
 	svc := Service{
-		Git:            &fakeGit{diff: diff.String()},
-		LLM:            slow,
-		ChunkThreshold: 500,
-		MaxConcurrency: 6, // allow all chunks to run at once for this test
-		Log:            noopLogger(),
+		git:            &fakeGit{diff: diff.String()},
+		llm:            slow,
+		chunkThreshold: 500,
+		maxConcurrency: 6, // allow all chunks to run at once for this test
+		log:            noopLogger(),
 	}
 
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
@@ -351,11 +351,11 @@ func TestMapReduce_ConcurrencyLimiterCapsInFlight(t *testing.T) {
 	}()
 
 	svc := Service{
-		Git:            &fakeGit{diff: diff.String()},
-		LLM:            slow,
-		ChunkThreshold: 500,
-		MaxConcurrency: 2,
-		Log:            noopLogger(),
+		git:            &fakeGit{diff: diff.String()},
+		llm:            slow,
+		chunkThreshold: 500,
+		maxConcurrency: 2,
+		log:            noopLogger(),
 	}
 
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
@@ -392,8 +392,8 @@ func TestMapReduce_PreservesChunkOrder(t *testing.T) {
 	var synthPrompt string
 
 	svc := Service{
-		Git: &fakeGit{diff: diff.String()},
-		LLM: &fakeLLM{
+		git: &fakeGit{diff: diff.String()},
+		llm: &fakeLLM{
 			onGenerate: func(p string) {
 				// Capture the synthesis prompt which contains all summaries.
 				if strings.Contains(p, "commit message") {
@@ -404,8 +404,8 @@ func TestMapReduce_PreservesChunkOrder(t *testing.T) {
 			},
 			response: "- ordered bullet",
 		},
-		ChunkThreshold: 300,
-		Log:            noopLogger(),
+		chunkThreshold: 300,
+		log:            noopLogger(),
 	}
 
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
@@ -432,14 +432,14 @@ func TestMapReduce_PartialChunkError_ReturnsError(t *testing.T) {
 	var callCount atomic.Int64
 
 	svc := Service{
-		Git: &fakeGit{diff: diff.String()},
-		LLM: &fakeLLM{
+		git: &fakeGit{diff: diff.String()},
+		llm: &fakeLLM{
 			onGenerate: func(string) { callCount.Add(1) },
 			// All calls fail — guarantees at least one error is captured.
 			err: fmt.Errorf("network timeout"),
 		},
-		ChunkThreshold: 300,
-		Log:            noopLogger(),
+		chunkThreshold: 300,
+		log:            noopLogger(),
 	}
 
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})

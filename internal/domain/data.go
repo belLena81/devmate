@@ -5,8 +5,6 @@ type Options struct {
 	Type    CmdType
 	Mode    CmdMode
 	Explain bool
-	// NoCache bypasses the response cache for this request: the LLM is always
-	// called and its fresh response overwrites any existing cached entry.
 	NoCache bool
 }
 

@@ -95,83 +95,96 @@ func parallelDo[In, Out any](
 }
 
 type Service struct {
-	Git            domain.GitClient
-	LLM            domain.LLM
-	Cache          Cache           // optional — nil is safe, treated as NoopCache
-	Progress       domain.Progress // optional — nil is safe, treated as NoopProgress
-	Model          string          // included in cache keys to isolate responses per model
-	Log            *slog.Logger
-	ChunkThreshold int
-	MaxConcurrency int           // max parallel LLM calls; 0 or negative means runtime.NumCPU()
-	BinaryHash     string        // included in cache keys so a new binary never serves stale entries
-	MaxRetries     int           // retry attempts for transient LLM errors; 0 means a single attempt
-	RetryBaseDelay time.Duration // initial back-off between retries; 0 uses defaultRetryBaseDelay
+	git            domain.GitClient
+	llm            domain.LLM
+	cache          Cache           // optional — nil is safe, treated as NoopCache
+	progress       domain.Progress // optional — nil is safe, treated as NoopProgress
+	model          string          // included in cache keys to isolate responses per model
+	log            *slog.Logger
+	chunkThreshold int
+	maxConcurrency int           // max parallel LLM calls; 0 or negative means runtime.NumCPU()
+	binaryHash     string        // included in cache keys so a new binary never serves stale entries
+	maxRetries     int           // retry attempts for transient LLM errors; 0 means a single attempt
+	retryBaseDelay time.Duration // initial back-off between retries; 0 uses defaultRetryBaseDelay
+}
+
+func NewService(git domain.GitClient, llm domain.LLM, cache Cache, logger *slog.Logger, threshold int) *Service {
+	return &Service{
+		git:            git,
+		llm:            llm,
+		cache:          cache,
+		model:          "",
+		log:            logger,
+		chunkThreshold: threshold,
+		maxConcurrency: DefaultServiceMaxConcurrency,
+		binaryHash:     BinaryHash(),
+	}
 }
 
 const defaultRetryBaseDelay = 2 * time.Second
 
-// ServiceOption is a functional option for configuring a Service at
-// construction time. Using options instead of post-construction field mutation
+// Settings is a functional settings for configuring a Service at
+// construction time. Using settings instead of post-construction field mutation
 // keeps the Service immutable after New() returns and makes the call site in
 // main.go self-documenting.
-type ServiceOption func(*Service)
+type Settings func(*Service)
 
 // WithProgress attaches a progress reporter to the service.
 // When not provided, a no-op reporter is used.
-func WithProgress(p domain.Progress) ServiceOption {
-	return func(s *Service) { s.Progress = p }
+func WithProgress(p domain.Progress) Settings {
+	return func(s *Service) { s.progress = p }
 }
 
 // WithChunkThreshold overrides the diff-size threshold above which map-reduce
 // chunking is used. Must be a positive value; zero is ignored (keeps default).
-func WithChunkThreshold(n int) ServiceOption {
+func WithChunkThreshold(n int) Settings {
 	return func(s *Service) {
 		if n > 0 {
-			s.ChunkThreshold = n
+			s.chunkThreshold = n
 		}
 	}
 }
 
-// WithMaxConcurrency overrides the maximum number of parallel LLM calls.
+// WithMaxConcurrency overrides the maximum number of parallel llm calls.
 // Zero or negative is ignored (keeps default; runtime.NumCPU() is used at
 // call time).
-func WithMaxConcurrency(n int) ServiceOption {
+func WithMaxConcurrency(n int) Settings {
 	return func(s *Service) {
 		if n > 0 {
-			s.MaxConcurrency = n
+			s.maxConcurrency = n
 		}
 	}
 }
 
-// WithMaxRetries sets the number of retry attempts for transient LLM errors.
+// WithMaxRetries sets the number of retry attempts for transient llm errors.
 // Zero means a single attempt (no retries), which is the default.
-func WithMaxRetries(n int) ServiceOption {
-	return func(s *Service) { s.MaxRetries = n }
+func WithMaxRetries(n int) Settings {
+	return func(s *Service) { s.maxRetries = n }
 }
 
 // WithRetryBaseDelay sets the initial exponential back-off delay between
 // retries. Zero is ignored (keeps the package default of 2 s).
-func WithRetryBaseDelay(d time.Duration) ServiceOption {
+func WithRetryBaseDelay(d time.Duration) Settings {
 	return func(s *Service) {
 		if d > 0 {
-			s.RetryBaseDelay = d
+			s.retryBaseDelay = d
 		}
 	}
 }
 
-// New constructs a Service with sensible defaults. Pass ServiceOption values
+// New constructs a Service with sensible defaults. Pass Settings values
 // to override any field — this is the only supported way to configure the
 // service after the constructor returns.
-func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *slog.Logger, opts ...ServiceOption) *Service {
+func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *slog.Logger, opts ...Settings) *Service {
 	svc := &Service{
-		Git:            git,
-		LLM:            llm,
-		Cache:          cache,
-		Model:          model,
-		Log:            log.With("component", "service"),
-		ChunkThreshold: DefaultChunkThreshold,
-		MaxConcurrency: DefaultServiceMaxConcurrency,
-		BinaryHash:     BinaryHash(),
+		git:            git,
+		llm:            llm,
+		cache:          cache,
+		model:          model,
+		log:            log.With("component", "service"),
+		chunkThreshold: DefaultChunkThreshold,
+		maxConcurrency: DefaultServiceMaxConcurrency,
+		binaryHash:     BinaryHash(),
 	}
 	for _, opt := range opts {
 		opt(svc)
@@ -181,48 +194,60 @@ func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *s
 
 // concurrency returns the effective concurrency limit.
 func (s *Service) concurrency() int {
-	if s.MaxConcurrency > 0 {
-		return s.MaxConcurrency
+	if s.maxConcurrency > 0 {
+		return s.maxConcurrency
 	}
 	return runtime.NumCPU()
 }
 
-// progress returns the configured Progress, or NoopProgress when nil.
-func (s *Service) progress() domain.Progress {
-	if s.Progress == nil {
+// Progress returns the configured progress, or NoopProgress when nil.
+func (s *Service) Progress() domain.Progress {
+	if s.progress == nil {
 		return domain.NoopProgress{}
 	}
-	return s.Progress
+	return s.progress
 }
 
-// cache returns the configured Cache, or NoopCache when nil.
-// Makes Cache an optional field: tests that omit it get safe no-op behaviour
+func (s *Service) ChunkThreshold() int {
+	return s.chunkThreshold
+}
+
+func (s *Service) MaxRetries() int {
+	return s.maxRetries
+}
+
+// Cache returns the configured cache, or NoopCache when nil.
+// Makes cache an optional field: tests that omit it get safe no-op behaviour
 // with no nil dereference risk.
-func (s *Service) cache() Cache {
-	if s.Cache == nil {
+func (s *Service) Cache() Cache {
+	if s.cache == nil {
 		return NoopCache{}
 	}
-	return s.Cache
+	return s.cache
 }
 
-// log returns the configured logger, or a discard logger when nil.
-func (s *Service) log() *slog.Logger {
-	if s.Log == nil {
+// Log returns the configured logger, or a discard logger when nil.
+func (s *Service) Log() *slog.Logger {
+	if s.log == nil {
 		return slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return s.Log
+	return s.log
 }
 
-// retryBaseDelay returns the configured base delay, falling back to the
+// RetryBaseDelay returns the configured base delay, falling back to the
 // package default when the field is zero (i.e. not explicitly set).
-func (s *Service) retryBaseDelay() time.Duration {
-	if s.RetryBaseDelay > 0 {
-		return s.RetryBaseDelay
+func (s *Service) RetryBaseDelay() time.Duration {
+	if s.retryBaseDelay > 0 {
+		return s.retryBaseDelay
 	}
 	return defaultRetryBaseDelay
 }
 
-// generateWithRetry calls s.LLM.Generate and retries up to s.MaxRetries times
+func (s *Service) Git() domain.GitClient {
+	return s.git
+}
+
+// GenerateWithRetry calls s.llm.Generate and retries up to s.MaxRetries times
 // on failure with exponential back-off. MaxRetries=0 means a single attempt.
 //
 // This is the single retry site in the application. The LLM client (OllamaClient)
@@ -231,19 +256,19 @@ func (s *Service) retryBaseDelay() time.Duration {
 //
 // ctx is forwarded to every LLM call. A cancelled or expired context
 // short-circuits immediately without further retries.
-func (s *Service) generateWithRetry(ctx context.Context, prompt string) (string, error) {
-	if s.LLM == nil {
-		return "", fmt.Errorf("service: LLM is not configured (nil)")
+func (s *Service) GenerateWithRetry(ctx context.Context, prompt string) (string, error) {
+	if s.llm == nil {
+		return "", fmt.Errorf("service: llm is not configured (nil)")
 	}
-	attempts := s.MaxRetries + 1
-	delay := s.retryBaseDelay()
+	attempts := s.maxRetries + 1
+	delay := s.RetryBaseDelay()
 
 	for i := 0; i < attempts; i++ {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
 		if i > 0 {
-			s.log().Debug("retrying LLM generate",
+			s.Log().Debug("retrying llm generate",
 				"attempt", i+1,
 				"of", attempts,
 				"after", delay,
@@ -256,7 +281,7 @@ func (s *Service) generateWithRetry(ctx context.Context, prompt string) (string,
 			delay *= 2
 		}
 
-		result, err := s.LLM.Generate(ctx, prompt)
+		result, err := s.llm.Generate(ctx, prompt)
 		if err == nil {
 			return result, nil
 		}
@@ -266,9 +291,9 @@ func (s *Service) generateWithRetry(ctx context.Context, prompt string) (string,
 			return "", err
 		}
 
-		s.log().Debug("LLM generate failed", "attempt", i+1, "of", attempts, "error", err)
+		s.Log().Debug("llm generate failed", "attempt", i+1, "of", attempts, "error", err)
 		if i == attempts-1 {
-			return "", fmt.Errorf("LLM generate failed after %d attempt(s): %w", attempts, err)
+			return "", fmt.Errorf("llm generate failed after %d attempt(s): %w", attempts, err)
 		}
 	}
 
@@ -293,12 +318,12 @@ type PrOptions struct {
 
 func (s *Service) mapReducePr(ctx context.Context, commits []string, options PrOptions) (string, error) {
 	joined := strings.Join(commits, "\n")
-	chunks := PackChunks(joined, s.ChunkThreshold)
+	chunks := PackChunks(joined, s.chunkThreshold)
 
-	s.log().Debug("starting PR map-reduce",
+	s.Log().Debug("starting PR map-reduce",
 		"total_bytes", len(joined),
 		"chunks", len(chunks),
-		"threshold", s.ChunkThreshold,
+		"threshold", s.ChunkThreshold(),
 	)
 
 	// Map phase: summarize each chunk of commits in parallel.
@@ -313,23 +338,23 @@ func (s *Service) mapReducePr(ctx context.Context, commits []string, options PrO
 		return "", err
 	}
 
-	s.log().Debug("synthesizing PR description", "summaries", summaries)
-	s.progress().Status("Synthesizing PR description...")
+	s.Log().Debug("synthesizing PR description", "summaries", summaries)
+	s.Progress().Status("Synthesizing PR description...")
 
 	prompt := BuildPrSynthesisPrompt(summaries, options)
-	result, err := s.generateWithRetry(ctx, prompt)
+	result, err := s.GenerateWithRetry(ctx, prompt)
 	if err != nil {
 		return "", err
 	}
 
-	s.log().Debug("PR synthesis complete", "result", result)
+	s.Log().Debug("PR synthesis complete", "result", result)
 	return sanitize(result), nil
 }
 
 func (s *Service) mapReduce(ctx context.Context, diff string, options CommitOptions) (string, error) {
-	chunks := PackChunks(diff, s.ChunkThreshold)
+	chunks := PackChunks(diff, s.ChunkThreshold())
 
-	s.log().Debug("starting map-reduce",
+	s.Log().Debug("starting map-reduce",
 		"total_bytes", len(diff),
 		"chunks", len(chunks),
 		"threshold", s.ChunkThreshold,
@@ -347,16 +372,16 @@ func (s *Service) mapReduce(ctx context.Context, diff string, options CommitOpti
 		return "", err
 	}
 
-	s.log().Debug("synthesizing", "summaries", summaries)
-	s.progress().Status("Synthesizing commit message...")
+	s.Log().Debug("synthesizing", "summaries", summaries)
+	s.Progress().Status("Synthesizing commit message...")
 
 	prompt := BuildSynthesisPrompt(summaries, options.Type, options.Mode, options.Explain)
-	result, err := s.generateWithRetry(ctx, prompt)
+	result, err := s.GenerateWithRetry(ctx, prompt)
 	if err != nil {
 		return "", err
 	}
 
-	s.log().Debug("synthesis complete", "result", result)
+	s.Log().Debug("synthesis complete", "result", result)
 	return result, nil
 }
 
@@ -366,22 +391,22 @@ func (s *Service) mapReduce(ctx context.Context, diff string, options CommitOpti
 func (s *Service) summarizeChunksParallel(ctx context.Context, chunks []Chunk) ([]string, error) {
 	n := len(chunks)
 	var completed atomic.Int64
-	s.progress().Status(fmt.Sprintf("Summarizing chunk 0/%d...", n))
+	s.Progress().Status(fmt.Sprintf("Summarizing chunk 0/%d...", n))
 
 	return parallelDo(ctx, s.concurrency(), chunks,
 		func(ctx context.Context, idx int, ch Chunk) (string, error) {
-			s.log().Debug("summarizing chunk",
+			s.Log().Debug("summarizing chunk",
 				"chunk", idx+1, "of", n,
 				"files", ch.Files, "bytes", len(ch.Content),
 			)
 			prompt := BuildChunkPrompt(ch.Content, idx+1, n)
-			summary, err := s.generateWithRetry(ctx, prompt)
+			summary, err := s.GenerateWithRetry(ctx, prompt)
 			if err != nil {
 				return "", fmt.Errorf("%w: chunk %d: %w", domain.ErrChunkFailed, idx+1, err)
 			}
 			done := completed.Add(1)
-			s.progress().Status(fmt.Sprintf("Summarizing chunk %d/%d...", done, n))
-			s.log().Debug("chunk summary received",
+			s.Progress().Status(fmt.Sprintf("Summarizing chunk %d/%d...", done, n))
+			s.Log().Debug("chunk summary received",
 				"chunk", idx+1, "files", ch.Files, "summary", summary,
 			)
 			return summary, nil
@@ -396,35 +421,35 @@ func (s *Service) summarizeChunksParallel(ctx context.Context, chunks []Chunk) (
 func (s *Service) reduceSummaries(ctx context.Context, summaries []string) ([]string, error) {
 	for {
 		total := summariesSize(summaries)
-		if total <= s.ChunkThreshold || len(summaries) <= 1 {
+		if total <= s.ChunkThreshold() || len(summaries) <= 1 {
 			return summaries, nil
 		}
 
-		s.log().Debug("summaries exceed threshold, reducing",
+		s.Log().Debug("summaries exceed threshold, reducing",
 			"summaries", len(summaries),
 			"total_bytes", total,
-			"threshold", s.ChunkThreshold,
+			"threshold", s.ChunkThreshold(),
 		)
 
-		groups := groupSummaries(summaries, s.ChunkThreshold)
+		groups := groupSummaries(summaries, s.ChunkThreshold())
 		var reduceCompleted atomic.Int64
-		s.progress().Status(fmt.Sprintf("Reducing summaries: group 0/%d...", len(groups)))
+		s.Progress().Status(fmt.Sprintf("Reducing summaries: group 0/%d...", len(groups)))
 
 		reduced, err := parallelDo(ctx, s.concurrency(), groups,
 			func(ctx context.Context, idx int, grp []string) (string, error) {
 				if len(grp) == 1 {
 					return grp[0], nil
 				}
-				s.log().Debug("reducing summary group",
+				s.Log().Debug("reducing summary group",
 					"group", idx+1, "of", len(groups), "items", len(grp),
 				)
 				prompt := BuildReducePrompt(grp)
-				condensed, err := s.generateWithRetry(ctx, prompt)
+				condensed, err := s.GenerateWithRetry(ctx, prompt)
 				if err != nil {
 					return "", fmt.Errorf("%w: group %d: %w", domain.ErrReduceFailed, idx+1, err)
 				}
 				done := reduceCompleted.Add(1)
-				s.progress().Status(fmt.Sprintf("Reducing summaries: group %d/%d...", done, len(groups)))
+				s.Progress().Status(fmt.Sprintf("Reducing summaries: group %d/%d...", done, len(groups)))
 				return condensed, nil
 			},
 		)
@@ -433,7 +458,7 @@ func (s *Service) reduceSummaries(ctx context.Context, summaries []string) ([]st
 		}
 
 		if len(reduced) >= len(summaries) {
-			s.log().Debug("reduction made no progress, proceeding with current summaries",
+			s.Log().Debug("reduction made no progress, proceeding with current summaries",
 				"before", len(summaries), "after", len(reduced))
 			return reduced, nil
 		}
@@ -452,7 +477,7 @@ func summariesSize(summaries []string) int {
 }
 
 // groupSummaries packs summaries into groups whose combined size does not
-// exceed maxSize. Each group will be sent to the LLM as one reduce call.
+// exceed maxSize. Each group will be sent to the llm as one reduce call.
 func groupSummaries(summaries []string, maxSize int) [][]string {
 	var groups [][]string
 	var current []string
@@ -488,138 +513,138 @@ func groupSummaries(summaries []string, maxSize int) [][]string {
 func (s *Service) DraftMessage(ctx context.Context, o CommitOptions) (string, error) {
 	typeStr, _ := o.Type.String()
 	modeStr := o.Mode.String()
-	s.log().Debug("drafting commit message", "type", typeStr, "mode", modeStr)
+	s.Log().Debug("drafting commit message", "type", typeStr, "mode", modeStr)
 
-	diff, err := s.Git.DiffCached()
+	diff, err := s.git.DiffCached()
 	if err != nil {
-		s.log().Error("failed to get diff", "error", err)
+		s.Log().Error("failed to get diff", "error", err)
 		return "", err
 	}
-	s.log().Debug("got diff", "bytes", len(diff))
+	s.Log().Debug("got diff", "bytes", len(diff))
 
-	key := commitCacheKey(s.Model, s.BinaryHash, diff, typeStr, modeStr, o.Explain)
+	key := commitCacheKey(s.model, s.binaryHash, diff, typeStr, modeStr, o.Explain)
 	if !o.NoCache {
-		if hit, ok := s.cache().Get(key); ok {
-			s.log().Debug("commit message cache hit")
+		if hit, ok := s.Cache().Get(key); ok {
+			s.Log().Debug("commit message cache hit")
 			return hit, nil
 		}
 	}
 
 	var result string
-	if s.ChunkThreshold > 0 && len(diff) > s.ChunkThreshold {
-		s.log().Debug("diff exceeds threshold, using map-reduce",
+	if s.ChunkThreshold() > 0 && len(diff) > s.ChunkThreshold() {
+		s.Log().Debug("diff exceeds threshold, using map-reduce",
 			"diff_bytes", len(diff),
-			"threshold", s.ChunkThreshold,
+			"threshold", s.ChunkThreshold(),
 		)
 		result, err = s.mapReduce(ctx, diff, o)
 	} else {
-		s.progress().Status("Generating commit message...")
+		s.Progress().Status("Generating commit message...")
 		prompt := BuildCommitPrompt(diff, o)
-		result, err = s.generateWithRetry(ctx, prompt)
+		result, err = s.GenerateWithRetry(ctx, prompt)
 	}
 	if err != nil {
-		s.progress().Done("")
-		s.log().Error("LLM generation failed", "error", err)
+		s.Progress().Done("")
+		s.Log().Error("llm generation failed", "error", err)
 		return "", err
 	}
 
 	result = sanitize(result)
-	if err := s.cache().Set(key, result); err != nil {
-		s.log().Debug("failed to write cache entry", "error", err)
+	if err := s.Cache().Set(key, result); err != nil {
+		s.Log().Debug("failed to write cache entry", "error", err)
 	}
 
-	s.progress().Done("")
-	s.log().Debug("message drafted successfully")
+	s.Progress().Done("")
+	s.Log().Debug("message drafted successfully")
 	return result, nil
 }
 
 func (s *Service) DraftBranchName(ctx context.Context, o BranchOptions) (string, error) {
 	typeStr, _ := o.Type.String()
 	modeStr := o.Mode.String()
-	s.log().Debug("drafting branch name", "task", o.Task, "type", typeStr, "mode", modeStr)
+	s.Log().Debug("drafting branch name", "task", o.Task, "type", typeStr, "mode", modeStr)
 
-	key := branchCacheKey(s.Model, s.BinaryHash, o.Task, typeStr, modeStr, o.Explain)
+	key := branchCacheKey(s.model, s.binaryHash, o.Task, typeStr, modeStr, o.Explain)
 	if !o.NoCache {
-		if hit, ok := s.cache().Get(key); ok {
-			s.log().Debug("branch name cache hit")
+		if hit, ok := s.Cache().Get(key); ok {
+			s.Log().Debug("branch name cache hit")
 			return hit, nil
 		}
 	}
 
-	s.progress().Status("Generating branch name...")
+	s.Progress().Status("Generating branch name...")
 	prompt := BuildBranchPrompt(o)
-	result, err := s.generateWithRetry(ctx, prompt)
+	result, err := s.GenerateWithRetry(ctx, prompt)
 	if err != nil {
-		s.progress().Done("")
-		s.log().Error("LLM generation failed", "error", err)
+		s.Progress().Done("")
+		s.Log().Error("llm generation failed", "error", err)
 		return "", err
 	}
 
 	result = extractBranchName(result)
-	if err := s.cache().Set(key, result); err != nil {
-		s.log().Debug("failed to write cache entry", "error", err)
+	if err := s.Cache().Set(key, result); err != nil {
+		s.Log().Debug("failed to write cache entry", "error", err)
 	}
 
-	s.progress().Done("")
-	s.log().Debug("branch name drafted successfully")
+	s.Progress().Done("")
+	s.Log().Debug("branch name drafted successfully")
 	return result, nil
 }
 
 func (s *Service) DraftPrDescription(ctx context.Context, o PrOptions) (string, error) {
 	typeStr, _ := o.Type.String()
 	modeStr := o.Mode.String()
-	s.log().Debug("drafting pr description", "source", o.SourceBranch, "destination", o.DestinationBranch, "type", typeStr, "mode", modeStr)
+	s.Log().Debug("drafting pr description", "source", o.SourceBranch, "destination", o.DestinationBranch, "type", typeStr, "mode", modeStr)
 
-	commits, err := s.Git.LogBetween(o.DestinationBranch, o.SourceBranch)
+	commits, err := s.git.LogBetween(o.DestinationBranch, o.SourceBranch)
 	if err != nil {
-		s.log().Error("failed to get commits", "error", err)
+		s.Log().Error("failed to get commits", "error", err)
 		return "", err
 	}
-	s.log().Debug("got commits", "count", len(commits))
+	s.Log().Debug("got commits", "count", len(commits))
 
 	if len(commits) == 0 {
-		s.log().Debug("no unique commits between branches, skipping LLM call",
+		s.Log().Debug("no unique commits between branches, skipping llm call",
 			"source", o.SourceBranch, "destination", o.DestinationBranch)
 		return "", domain.ErrEmptyPR
 	}
 
-	key := prCacheKey(s.Model, s.BinaryHash, commits, typeStr, modeStr, o.Explain)
+	key := prCacheKey(s.model, s.binaryHash, commits, typeStr, modeStr, o.Explain)
 	if !o.NoCache {
-		if hit, ok := s.cache().Get(key); ok {
-			s.log().Debug("pr description cache hit")
+		if hit, ok := s.Cache().Get(key); ok {
+			s.Log().Debug("pr description cache hit")
 			return hit, nil
 		}
 	}
 
 	var result string
 	joinedCommits := strings.Join(commits, "\n")
-	if s.ChunkThreshold > 0 && len(joinedCommits) > s.ChunkThreshold {
-		s.log().Debug("commits exceeds threshold, using map-reduce",
+	if s.ChunkThreshold() > 0 && len(joinedCommits) > s.ChunkThreshold() {
+		s.Log().Debug("commits exceeds threshold, using map-reduce",
 			"commits_bytes", len(joinedCommits),
-			"threshold", s.ChunkThreshold,
+			"threshold", s.ChunkThreshold(),
 		)
 		result, err = s.mapReducePr(ctx, commits, o)
 	} else {
-		s.progress().Status("Generating PR description...")
+		s.Progress().Status("Generating PR description...")
 		prompt := BuildPrPrompt(commits, o)
-		result, err = s.generateWithRetry(ctx, prompt)
+		result, err = s.GenerateWithRetry(ctx, prompt)
 		if err == nil {
 			result = sanitize(result)
 		}
 	}
 
 	if err != nil {
-		s.progress().Done("")
-		s.log().Error("LLM generation failed", "error", err)
+		s.Progress().Done("")
+		s.Log().Error("llm generation failed", "error", err)
 		return "", err
 	}
 
-	if err := s.cache().Set(key, result); err != nil {
-		s.log().Debug("failed to write cache entry", "error", err)
+	if err := s.Cache().Set(key, result); err != nil {
+		s.Log().Debug("failed to write cache entry", "error", err)
 	}
 
-	s.progress().Done("")
-	s.log().Debug("pr description drafted successfully")
+	s.Progress().Done("")
+	s.Log().Debug("pr description drafted successfully")
 	return result, nil
 }
 

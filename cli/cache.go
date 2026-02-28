@@ -9,7 +9,7 @@ import (
 )
 
 // CacheService is the interface the cache subcommands require.
-// It is satisfied by *service.DiskCache (via a thin adapter) and by
+// It is satisfied by *service.diskCache (via a thin adapter) and by
 // fakeCacheService in tests.
 type CacheService interface {
 	// Clean removes all cached entries.

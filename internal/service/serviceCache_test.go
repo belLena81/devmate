@@ -43,11 +43,11 @@ func (f *fakeCache) Clear() error {
 func TestDraftMessage_CacheMiss_CallsLLMAndStores(t *testing.T) {
 	cache := newFakeCache()
 	svc := Service{
-		Git:   &fakeGit{diff: "some diff"},
-		LLM:   &fakeLLM{response: "feat: add thing"},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		git:   &fakeGit{diff: "some diff"},
+		llm:   &fakeLLM{response: "feat: add thing"},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	result, err := svc.DraftMessage(context.Background(), CommitOptions{})
@@ -66,11 +66,11 @@ func TestDraftMessage_CacheHit_DoesNotCallLLM(t *testing.T) {
 	cache := newFakeCache()
 	llmCalls := 0
 	svc := Service{
-		Git:   &fakeGit{diff: "some diff"},
-		LLM:   &fakeLLM{response: "feat: cached", onGenerate: func(string) { llmCalls++ }},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		git:   &fakeGit{diff: "some diff"},
+		llm:   &fakeLLM{response: "feat: cached", onGenerate: func(string) { llmCalls++ }},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	svc.DraftMessage(context.Background(), CommitOptions{})                // miss — populates cache
@@ -89,11 +89,11 @@ func TestDraftMessage_CacheHit_DoesNotCallLLM(t *testing.T) {
 func TestDraftMessage_LLMError_DoesNotCache(t *testing.T) {
 	cache := newFakeCache()
 	svc := Service{
-		Git:   &fakeGit{diff: "some diff"},
-		LLM:   &fakeLLM{err: errors.New("llm failed")},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		git:   &fakeGit{diff: "some diff"},
+		llm:   &fakeLLM{err: errors.New("llm failed")},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	svc.DraftMessage(context.Background(), CommitOptions{})
@@ -106,11 +106,11 @@ func TestDraftMessage_DifferentMode_IndependentCacheEntries(t *testing.T) {
 	cache := newFakeCache()
 	llmCalls := 0
 	svc := Service{
-		Git:   &fakeGit{diff: "same diff"},
-		LLM:   &fakeLLM{response: "msg", onGenerate: func(string) { llmCalls++ }},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		git:   &fakeGit{diff: "same diff"},
+		llm:   &fakeLLM{response: "msg", onGenerate: func(string) { llmCalls++ }},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	svc.DraftMessage(context.Background(), CommitOptions{Options: domain.Options{Mode: domain.Short}})
@@ -127,11 +127,11 @@ func TestDraftMessage_DifferentDiff_IndependentCacheEntries(t *testing.T) {
 
 	makeService := func(diff string) *Service {
 		return &Service{
-			Git:   &fakeGit{diff: diff},
-			LLM:   &fakeLLM{response: "msg", onGenerate: func(string) { llmCalls++ }},
-			Cache: cache,
-			Model: "test-model",
-			Log:   noopLogger(),
+			git:   &fakeGit{diff: diff},
+			llm:   &fakeLLM{response: "msg", onGenerate: func(string) { llmCalls++ }},
+			cache: cache,
+			model: "test-model",
+			log:   noopLogger(),
 		}
 	}
 
@@ -148,10 +148,10 @@ func TestDraftMessage_DifferentDiff_IndependentCacheEntries(t *testing.T) {
 func TestDraftBranchName_CacheMiss_CallsLLMAndStores(t *testing.T) {
 	cache := newFakeCache()
 	svc := Service{
-		LLM:   &fakeLLM{response: "feat/add-auth"},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		llm:   &fakeLLM{response: "feat/add-auth"},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	result, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: "add authentication"})
@@ -170,10 +170,10 @@ func TestDraftBranchName_CacheHit_DoesNotCallLLM(t *testing.T) {
 	cache := newFakeCache()
 	llmCalls := 0
 	svc := Service{
-		LLM:   &fakeLLM{response: "feat/add-auth", onGenerate: func(string) { llmCalls++ }},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		llm:   &fakeLLM{response: "feat/add-auth", onGenerate: func(string) { llmCalls++ }},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	opts := BranchOptions{Task: "add authentication"}
@@ -188,10 +188,10 @@ func TestDraftBranchName_CacheHit_DoesNotCallLLM(t *testing.T) {
 func TestDraftBranchName_LLMError_DoesNotCache(t *testing.T) {
 	cache := newFakeCache()
 	svc := Service{
-		LLM:   &fakeLLM{err: errors.New("llm failed")},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		llm:   &fakeLLM{err: errors.New("llm failed")},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	svc.DraftBranchName(context.Background(), BranchOptions{Task: "some task"})
@@ -205,11 +205,11 @@ func TestDraftBranchName_LLMError_DoesNotCache(t *testing.T) {
 func TestDraftPrDescription_CacheMiss_CallsLLMAndStores(t *testing.T) {
 	cache := newFakeCache()
 	svc := Service{
-		Git:   &fakeGit{commits: []string{"feat: add login"}},
-		LLM:   &fakeLLM{response: "PR description"},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		git:   &fakeGit{commits: []string{"feat: add login"}},
+		llm:   &fakeLLM{response: "PR description"},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
@@ -225,11 +225,11 @@ func TestDraftPrDescription_CacheHit_DoesNotCallLLM(t *testing.T) {
 	cache := newFakeCache()
 	llmCalls := 0
 	svc := Service{
-		Git:   &fakeGit{commits: []string{"feat: add login"}},
-		LLM:   &fakeLLM{response: "PR desc", onGenerate: func(string) { llmCalls++ }},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		git:   &fakeGit{commits: []string{"feat: add login"}},
+		llm:   &fakeLLM{response: "PR desc", onGenerate: func(string) { llmCalls++ }},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	opts := PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"}
@@ -244,11 +244,11 @@ func TestDraftPrDescription_CacheHit_DoesNotCallLLM(t *testing.T) {
 func TestDraftPrDescription_LLMError_DoesNotCache(t *testing.T) {
 	cache := newFakeCache()
 	svc := Service{
-		Git:   &fakeGit{commits: []string{"feat: something"}},
-		LLM:   &fakeLLM{err: errors.New("llm failed")},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		git:   &fakeGit{commits: []string{"feat: something"}},
+		llm:   &fakeLLM{err: errors.New("llm failed")},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
@@ -263,11 +263,11 @@ func TestDraftPrDescription_NewCommitAdded_CacheMiss(t *testing.T) {
 
 	makeService := func(commits []string) *Service {
 		return &Service{
-			Git:   &fakeGit{commits: commits},
-			LLM:   &fakeLLM{response: "pr", onGenerate: func(string) { llmCalls++ }},
-			Cache: cache,
-			Model: "test-model",
-			Log:   noopLogger(),
+			git:   &fakeGit{commits: commits},
+			llm:   &fakeLLM{response: "pr", onGenerate: func(string) { llmCalls++ }},
+			cache: cache,
+			model: "test-model",
+			log:   noopLogger(),
 		}
 	}
 
@@ -292,11 +292,11 @@ func TestDraftMessage_NoCache_SkipsCacheGet(t *testing.T) {
 	cache := newFakeCache()
 	llmCalls := 0
 	svc := Service{
-		Git:   &fakeGit{diff: "some diff"},
-		LLM:   &fakeLLM{response: "feat: fresh", onGenerate: func(string) { llmCalls++ }},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		git:   &fakeGit{diff: "some diff"},
+		llm:   &fakeLLM{response: "feat: fresh", onGenerate: func(string) { llmCalls++ }},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	// Prime the cache with a normal call.
@@ -322,19 +322,14 @@ func TestDraftMessage_NoCache_SkipsCacheGet(t *testing.T) {
 // so subsequent normal calls serve the updated value.
 func TestDraftMessage_NoCache_OverwritesCachedEntry(t *testing.T) {
 	cache := newFakeCache()
-	callCount := 0
 	responses := []string{"feat: original", "feat: refreshed"}
 	svc := Service{
-		Git: &fakeGit{diff: "some diff"},
-		LLM: &fakeLLM{onGenerate: func(string) {
-			callCount++
-		}},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		git:   &fakeGit{diff: "some diff"},
+		llm:   &sequenceLLM{responses: responses},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
-	// Override Generate to return different values per call.
-	svc.LLM = &sequenceLLM{responses: responses}
 
 	// Prime cache.
 	r1, _ := svc.DraftMessage(context.Background(), CommitOptions{})
@@ -359,10 +354,10 @@ func TestDraftBranchName_NoCache_SkipsCacheGet(t *testing.T) {
 	cache := newFakeCache()
 	llmCalls := 0
 	svc := Service{
-		LLM:   &fakeLLM{response: "feat/branch", onGenerate: func(string) { llmCalls++ }},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		llm:   &fakeLLM{response: "feat/branch", onGenerate: func(string) { llmCalls++ }},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	opts := BranchOptions{Task: "add auth"}
@@ -389,11 +384,11 @@ func TestDraftPrDescription_NoCache_SkipsCacheGet(t *testing.T) {
 	cache := newFakeCache()
 	llmCalls := 0
 	svc := Service{
-		Git:   &fakeGit{commits: []string{"feat: thing"}},
-		LLM:   &fakeLLM{response: "PR desc", onGenerate: func(string) { llmCalls++ }},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		git:   &fakeGit{commits: []string{"feat: thing"}},
+		llm:   &fakeLLM{response: "PR desc", onGenerate: func(string) { llmCalls++ }},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	opts := PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"}
@@ -445,11 +440,11 @@ func TestCache_CommitAndBranch_DoNotShareEntries(t *testing.T) {
 	cache := newFakeCache()
 	llmCalls := 0
 	svc := Service{
-		Git:   &fakeGit{diff: "content"},
-		LLM:   &fakeLLM{response: "result", onGenerate: func(string) { llmCalls++ }},
-		Cache: cache,
-		Model: "test-model",
-		Log:   noopLogger(),
+		git:   &fakeGit{diff: "content"},
+		llm:   &fakeLLM{response: "result", onGenerate: func(string) { llmCalls++ }},
+		cache: cache,
+		model: "test-model",
+		log:   noopLogger(),
 	}
 
 	svc.DraftMessage(context.Background(), CommitOptions{})

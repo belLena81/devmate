@@ -42,15 +42,13 @@ func NewAppWithService(svc *service.Service) (*App, error) {
 	return newAppFromService(svc), nil
 }
 
-// newAppFromService wires the given service into an App. It is a pure
-// constructor: it reads from svc but never mutates it. Callers are responsible
-// for ensuring svc.Git is set before calling into any command that needs it.
+// newAppFromService wires the given service into an App.
 func newAppFromService(svc *service.Service) *App {
 	app := &App{
 		commitService: svc,
 		branchService: svc,
 		prService:     svc,
-		cacheService:  newCacheSvcAdapter(svc.Cache),
+		cacheService:  newCacheSvcAdapter(svc.Cache()),
 	}
 	app.rootCmd = buildRootCmd(app)
 	return app

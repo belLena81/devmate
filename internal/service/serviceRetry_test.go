@@ -35,22 +35,22 @@ const testRetryDelay = time.Millisecond
 
 func TestGenerateWithRetry_NilLLM_ReturnsError(t *testing.T) {
 	svc := &Service{
-		LLM: nil,
-		Log: noopLogger(),
+		llm: nil,
+		log: noopLogger(),
 	}
 
 	var err error
-	require_no_panic_svc(t, func() {
-		_, err = svc.generateWithRetry(context.Background(), "prompt")
+	requireNoPanicService(t, func() {
+		_, err = svc.GenerateWithRetry(context.Background(), "prompt")
 	})
 	if err == nil {
 		t.Error("generateWithRetry with nil LLM must return an error, not panic")
 	}
 }
 
-// require_no_panic_svc is a local copy of the helper to avoid cross-package
+// requireNoPanicService is a local copy of the helper to avoid cross-package
 // dependency while keeping the test self-contained.
-func require_no_panic_svc(t *testing.T, fn func()) {
+func requireNoPanicService(t *testing.T, fn func()) {
 	t.Helper()
 	defer func() {
 		if r := recover(); r != nil {
@@ -71,13 +71,13 @@ func TestDraftPrDescription_ChunkedCommits_UsesMapReduce(t *testing.T) {
 
 	var callCount atomic.Int32
 	svc := Service{
-		Git: &fakeGit{commits: commits},
-		LLM: &fakeLLM{
+		git: &fakeGit{commits: commits},
+		llm: &fakeLLM{
 			response:   "- bullet summary",
 			onGenerate: func(string) { callCount.Add(1) },
 		},
-		Log:            noopLogger(),
-		ChunkThreshold: 100,
+		log:            noopLogger(),
+		chunkThreshold: 100,
 	}
 
 	result, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
@@ -96,13 +96,13 @@ func TestDraftPrDescription_ChunkedCommits_UsesMapReduce(t *testing.T) {
 func TestDraftPrDescription_SmallCommits_SingleLLMCall(t *testing.T) {
 	var callCount atomic.Int32
 	svc := Service{
-		Git: &fakeGit{commits: []string{"feat: small"}},
-		LLM: &fakeLLM{
+		git: &fakeGit{commits: []string{"feat: small"}},
+		llm: &fakeLLM{
 			response:   "PR description",
 			onGenerate: func(string) { callCount.Add(1) },
 		},
-		Log:            noopLogger(),
-		ChunkThreshold: 1000,
+		log:            noopLogger(),
+		chunkThreshold: 1000,
 	}
 
 	result, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
@@ -121,9 +121,9 @@ func TestDraftPrDescription_ReturnsResultAfterSingleCall(t *testing.T) {
 	// Regression: the original code had a shadowed :=  variable bug that
 	// caused DraftPrDescription to always return "" for non-chunked paths.
 	svc := Service{
-		Git: &fakeGit{commits: []string{"feat: add login"}},
-		LLM: &fakeLLM{response: "## PR description text"},
-		Log: noopLogger(),
+		git: &fakeGit{commits: []string{"feat: add login"}},
+		llm: &fakeLLM{response: "## PR description text"},
+		log: noopLogger(),
 	}
 
 	result, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/login", DestinationBranch: "main"})
@@ -138,12 +138,15 @@ func TestDraftPrDescription_ReturnsResultAfterSingleCall(t *testing.T) {
 func TestDraftPrDescription_LLMError_StillCallsDone(t *testing.T) {
 	fp := &fakeProgress{}
 	svc := Service{
-		Git:      &fakeGit{commits: []string{"feat: something"}},
-		LLM:      &fakeLLM{err: errors.New("fail")},
-		Log:      noopLogger(),
-		Progress: fp,
+		git:      &fakeGit{commits: []string{"feat: something"}},
+		llm:      &fakeLLM{err: errors.New("fail")},
+		log:      noopLogger(),
+		progress: fp,
 	}
-	svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
+	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
+	if err == nil {
+		t.Error("DraftPrDescription with failing LLM must return an error, not panic")
+	}
 	if fp.doneCount() == 0 {
 		t.Error("expected Done to be called even on error")
 	}
@@ -157,16 +160,16 @@ func TestDraftPrDescription_MapReduce_ReportsChunkProgress(t *testing.T) {
 
 	fp := &fakeProgress{}
 	svc := Service{
-		Git:            &fakeGit{commits: commits},
-		LLM:            &fakeLLM{response: "- bullet"},
-		Log:            noopLogger(),
-		Progress:       fp,
-		ChunkThreshold: 100,
+		git:            &fakeGit{commits: commits},
+		llm:            &fakeLLM{response: "- bullet"},
+		log:            noopLogger(),
+		progress:       fp,
+		chunkThreshold: 100,
 	}
 
 	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("unexpected error: %v", err)
 	}
 	if !fp.hasStatusContaining("Summarizing") {
 		t.Error("expected chunk summarization progress for PR")
@@ -190,22 +193,28 @@ func TestDraftPrDescription_MapReduce_CachesResult(t *testing.T) {
 	cache := newFakeCache()
 	var llmCalls atomic.Int32
 	svc := Service{
-		Git: &fakeGit{commits: commits},
-		LLM: &fakeLLM{
+		git: &fakeGit{commits: commits},
+		llm: &fakeLLM{
 			response:   "- summary",
 			onGenerate: func(string) { llmCalls.Add(1) },
 		},
-		Cache:          cache,
-		Model:          "test-model",
-		Log:            noopLogger(),
-		ChunkThreshold: 100,
+		cache:          cache,
+		model:          "test-model",
+		log:            noopLogger(),
+		chunkThreshold: 100,
 	}
 
 	opts := PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"}
-	svc.DraftPrDescription(context.Background(), opts) // miss
+	_, err := svc.DraftPrDescription(context.Background(), opts) // miss
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
 	firstCalls := llmCalls.Load()
 
-	svc.DraftPrDescription(context.Background(), opts) // should hit cache
+	_, err = svc.DraftPrDescription(context.Background(), opts) // should hit cache
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
 	if llmCalls.Load() != firstCalls {
 		t.Errorf("second call should use cache, but LLM was called again (total=%d, after_first=%d)",
 			llmCalls.Load(), firstCalls)
@@ -219,9 +228,9 @@ func TestDraftBranchName_LongTask_StillReturnsResult(t *testing.T) {
 	// Service should handle it without panicking or returning an error.
 	longTask := strings.Repeat("add feature for user management system ", 200) // ~7600 chars
 	svc := Service{
-		LLM:            &fakeLLM{response: "feat/user-management"},
-		Log:            noopLogger(),
-		ChunkThreshold: DefaultChunkThreshold,
+		llm:            &fakeLLM{response: "feat/user-management"},
+		log:            noopLogger(),
+		chunkThreshold: DefaultChunkThreshold,
 	}
 
 	result, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: longTask})
@@ -236,11 +245,14 @@ func TestDraftBranchName_LongTask_StillReturnsResult(t *testing.T) {
 func TestDraftBranchName_LLMError_StillCallsDone(t *testing.T) {
 	fp := &fakeProgress{}
 	svc := Service{
-		LLM:      &fakeLLM{err: errors.New("fail")},
-		Log:      noopLogger(),
-		Progress: fp,
+		llm:      &fakeLLM{err: errors.New("fail")},
+		log:      noopLogger(),
+		progress: fp,
 	}
-	svc.DraftBranchName(context.Background(), BranchOptions{Task: "some task"})
+	_, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: "some task"})
+	if err == nil {
+		t.Error("DraftBranchName with failing LLM must return an error, not panic")
+	}
 	if fp.doneCount() == 0 {
 		t.Error("expected Done to be called even on error")
 	}
@@ -251,11 +263,11 @@ func TestDraftBranchName_LLMError_StillCallsDone(t *testing.T) {
 func TestDraftMessage_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 	llm := &countingLLM{failTimes: 2, response: "feat: add thing"}
 	svc := Service{
-		Git:            &fakeGit{diff: "some diff"},
-		LLM:            llm,
-		Log:            noopLogger(),
-		MaxRetries:     3,
-		RetryBaseDelay: testRetryDelay,
+		git:            &fakeGit{diff: "some diff"},
+		llm:            llm,
+		log:            noopLogger(),
+		maxRetries:     3,
+		retryBaseDelay: testRetryDelay,
 	}
 
 	result, err := svc.DraftMessage(context.Background(), CommitOptions{})
@@ -273,11 +285,11 @@ func TestDraftMessage_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 func TestDraftMessage_Retry_ExhaustedReturnsError(t *testing.T) {
 	llm := &countingLLM{failTimes: 10, response: "never"}
 	svc := Service{
-		Git:            &fakeGit{diff: "some diff"},
-		LLM:            llm,
-		Log:            noopLogger(),
-		MaxRetries:     2,
-		RetryBaseDelay: testRetryDelay,
+		git:            &fakeGit{diff: "some diff"},
+		llm:            llm,
+		log:            noopLogger(),
+		maxRetries:     2,
+		retryBaseDelay: testRetryDelay,
 	}
 
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
@@ -289,11 +301,11 @@ func TestDraftMessage_Retry_ExhaustedReturnsError(t *testing.T) {
 func TestDraftMessage_Retry_ZeroRetries_FailsImmediately(t *testing.T) {
 	llm := &countingLLM{failTimes: 1, response: "msg"}
 	svc := Service{
-		Git:            &fakeGit{diff: "some diff"},
-		LLM:            llm,
-		Log:            noopLogger(),
-		MaxRetries:     0, // no retries — first failure is final
-		RetryBaseDelay: testRetryDelay,
+		git:            &fakeGit{diff: "some diff"},
+		llm:            llm,
+		log:            noopLogger(),
+		maxRetries:     0, // no retries — first failure is final
+		retryBaseDelay: testRetryDelay,
 	}
 
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
@@ -308,11 +320,11 @@ func TestDraftMessage_Retry_ZeroRetries_FailsImmediately(t *testing.T) {
 func TestDraftPrDescription_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 	llm := &countingLLM{failTimes: 1, response: "PR description"}
 	svc := Service{
-		Git:            &fakeGit{commits: []string{"feat: thing"}},
-		LLM:            llm,
-		Log:            noopLogger(),
-		MaxRetries:     2,
-		RetryBaseDelay: testRetryDelay,
+		git:            &fakeGit{commits: []string{"feat: thing"}},
+		llm:            llm,
+		log:            noopLogger(),
+		maxRetries:     2,
+		retryBaseDelay: testRetryDelay,
 	}
 
 	result, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
@@ -327,10 +339,10 @@ func TestDraftPrDescription_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 func TestDraftBranchName_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 	llm := &countingLLM{failTimes: 1, response: "feat/add-auth"}
 	svc := Service{
-		LLM:            llm,
-		Log:            noopLogger(),
-		MaxRetries:     2,
-		RetryBaseDelay: testRetryDelay,
+		llm:            llm,
+		log:            noopLogger(),
+		maxRetries:     2,
+		retryBaseDelay: testRetryDelay,
 	}
 
 	result, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: "add authentication"})
@@ -345,10 +357,10 @@ func TestDraftBranchName_Retry_SucceedsAfterTransientFailure(t *testing.T) {
 func TestDraftBranchName_Retry_ExhaustedReturnsError(t *testing.T) {
 	llm := &countingLLM{failTimes: 10, response: "never"}
 	svc := Service{
-		LLM:            llm,
-		Log:            noopLogger(),
-		MaxRetries:     2,
-		RetryBaseDelay: testRetryDelay,
+		llm:            llm,
+		log:            noopLogger(),
+		maxRetries:     2,
+		retryBaseDelay: testRetryDelay,
 	}
 
 	_, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: "some task"})
@@ -360,11 +372,11 @@ func TestDraftBranchName_Retry_ExhaustedReturnsError(t *testing.T) {
 func TestDraftPrDescription_Retry_ExhaustedReturnsError(t *testing.T) {
 	llm := &countingLLM{failTimes: 10, response: "never"}
 	svc := Service{
-		Git:            &fakeGit{commits: []string{"feat: thing"}},
-		LLM:            llm,
-		Log:            noopLogger(),
-		MaxRetries:     2,
-		RetryBaseDelay: testRetryDelay,
+		git:            &fakeGit{commits: []string{"feat: thing"}},
+		llm:            llm,
+		log:            noopLogger(),
+		maxRetries:     2,
+		retryBaseDelay: testRetryDelay,
 	}
 
 	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})

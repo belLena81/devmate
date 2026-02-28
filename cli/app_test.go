@@ -81,13 +81,7 @@ func noopLogger() *slog.Logger {
 // does not modify any field of the Service it receives. The caller (main.go)
 // retains full ownership of the service after construction.
 func TestNewAppWithService_DoesNotMutateService(t *testing.T) {
-	svc := &service.Service{
-		LLM:   &stubLLM{},
-		Cache: service.NoopCache{},
-		Log:   noopLogger(),
-		// Git is intentionally left nil: NewAppWithService must not overwrite it.
-		Git: nil,
-	}
+	svc := service.NewService(nil, &stubLLM{}, service.NoopCache{}, noopLogger(), 0)
 
 	_, err := cli.NewAppWithService(svc)
 	if err != nil {
@@ -95,7 +89,7 @@ func TestNewAppWithService_DoesNotMutateService(t *testing.T) {
 	}
 
 	// The constructor must never assign a new GitClient to the caller's service.
-	if svc.Git != nil {
+	if svc.Git() != nil {
 		t.Error("NewAppWithService must not mutate svc.Git (unexpected side-effect)")
 	}
 }
@@ -121,11 +115,7 @@ func TestApp_RootCmd_IsNamed_devmate(t *testing.T) {
 }
 
 func TestNewAppWithService_ReturnsNonNilApp(t *testing.T) {
-	svc := &service.Service{
-		LLM:   &stubLLM{},
-		Cache: service.NoopCache{},
-		Log:   noopLogger(),
-	}
+	svc := service.NewService(nil, &stubLLM{}, service.NoopCache{}, noopLogger(), 0)
 	app, err := cli.NewAppWithService(svc)
 	if err != nil {
 		t.Fatalf("NewAppWithService: %v", err)
@@ -164,11 +154,7 @@ func TestApp_CacheStatCmd_IsRegistered(t *testing.T) {
 // NewAppWithService automatically derives the cacheService from svc.Cache so
 // callers do not need to wire it manually.
 func TestNewAppWithService_CacheService_DerivedFromServiceCache(t *testing.T) {
-	svc := &service.Service{
-		LLM:   &stubLLM{},
-		Cache: service.NoopCache{},
-		Log:   noopLogger(),
-	}
+	svc := service.NewService(nil, &stubLLM{}, service.NoopCache{}, noopLogger(), 0)
 	app, err := cli.NewAppWithService(svc)
 	if err != nil {
 		t.Fatalf("NewAppWithService: %v", err)

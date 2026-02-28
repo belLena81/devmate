@@ -88,13 +88,13 @@ func (f *fakeProgress) doneCount() int {
 
 func TestCommitService_DraftsMessage(t *testing.T) {
 	svc := Service{
-		Git: &fakeGit{
+		git: &fakeGit{
 			diff: "diff --git a/a.go b/a.go",
 		},
-		LLM: &fakeLLM{
+		llm: &fakeLLM{
 			response: "feat: add new feature",
 		},
-		Log: noopLogger(),
+		log: noopLogger(),
 	}
 
 	opts := CommitOptions{}
@@ -117,14 +117,14 @@ func TestCommitService_PassesDiffToLLM(t *testing.T) {
 	var receivedPrompt string
 
 	svc := Service{
-		Git: &fakeGit{diff: "STAGED DIFF"},
-		LLM: &fakeLLM{
+		git: &fakeGit{diff: "STAGED DIFF"},
+		llm: &fakeLLM{
 			onGenerate: func(prompt string) {
 				receivedPrompt = prompt
 			},
 			response: "msg",
 		},
-		Log: noopLogger(),
+		log: noopLogger(),
 	}
 
 	opts := CommitOptions{}
@@ -148,9 +148,9 @@ func (e *errorGit) LogBetween(base, head string) ([]string, error) {
 
 func TestCommitService_GitError(t *testing.T) {
 	svc := Service{
-		Git: &errorGit{},
-		LLM: &fakeLLM{},
-		Log: noopLogger(),
+		git: &errorGit{},
+		llm: &fakeLLM{},
+		log: noopLogger(),
 	}
 
 	opts := CommitOptions{}
@@ -163,8 +163,8 @@ func TestCommitService_GitError(t *testing.T) {
 
 func TestBranchService_DraftsBranchName(t *testing.T) {
 	svc := Service{
-		LLM: &fakeLLM{response: "feat/add-auth"},
-		Log: noopLogger(),
+		llm: &fakeLLM{response: "feat/add-auth"},
+		log: noopLogger(),
 	}
 	opts := BranchOptions{Task: "add authentication"}
 	result, err := svc.DraftBranchName(context.Background(), opts)
@@ -179,10 +179,13 @@ func TestBranchService_DraftsBranchName(t *testing.T) {
 func TestBranchService_PassesTaskToLLM(t *testing.T) {
 	var received string
 	svc := Service{
-		LLM: &fakeLLM{onGenerate: func(p string) { received = p }},
-		Log: noopLogger(),
+		llm: &fakeLLM{onGenerate: func(p string) { received = p }},
+		log: noopLogger(),
 	}
-	svc.DraftBranchName(context.Background(), BranchOptions{Task: "fix login bug"})
+	_, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: "fix login bug"})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
 	if !strings.Contains(received, "fix login bug") {
 		t.Errorf("task not in prompt, got: %q", received)
 	}
@@ -190,14 +193,14 @@ func TestBranchService_PassesTaskToLLM(t *testing.T) {
 
 func TestPrService_DraftsPrDescription(t *testing.T) {
 	svc := Service{
-		Git: &fakeGit{commits: []string{"feat: add login"}},
-		LLM: &fakeLLM{response: "feat: add login"},
-		Log: noopLogger(),
+		git: &fakeGit{commits: []string{"feat: add login"}},
+		llm: &fakeLLM{response: "feat: add login"},
+		log: noopLogger(),
 	}
 	opts := PrOptions{SourceBranch: "feature/login", DestinationBranch: "main"}
 	result, err := svc.DraftPrDescription(context.Background(), opts)
 	if err != nil {
-		t.Fatal(err)
+		t.Errorf("unexpected error: %v", err)
 	}
 	if result != "feat: add login" {
 		t.Errorf("unexpected result: %q", result)
@@ -207,11 +210,14 @@ func TestPrService_DraftsPrDescription(t *testing.T) {
 func TestPrService_PassesDiffToLLM(t *testing.T) {
 	var received string
 	svc := Service{
-		Git: &fakeGit{commits: []string{"one", "two"}},
-		LLM: &fakeLLM{onGenerate: func(p string) { received = p }},
-		Log: noopLogger(),
+		git: &fakeGit{commits: []string{"one", "two"}},
+		llm: &fakeLLM{onGenerate: func(p string) { received = p }},
+		log: noopLogger(),
 	}
-	svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
+	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
 	if !strings.Contains(received, "- one") || !strings.Contains(received, "- two") {
 		t.Errorf("commits are not in prompt, got: %q", received)
 	}
@@ -219,9 +225,9 @@ func TestPrService_PassesDiffToLLM(t *testing.T) {
 
 func TestPrService_GitError(t *testing.T) {
 	svc := Service{
-		Git: &errorGit{},
-		LLM: &fakeLLM{},
-		Log: noopLogger(),
+		git: &errorGit{},
+		llm: &fakeLLM{},
+		log: noopLogger(),
 	}
 	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
 	if err == nil {
@@ -231,9 +237,9 @@ func TestPrService_GitError(t *testing.T) {
 
 func TestPrService_LLMError(t *testing.T) {
 	svc := Service{
-		Git: &fakeGit{diff: "some diff"},
-		LLM: &fakeLLM{err: errors.New("LLM failed")},
-		Log: noopLogger(),
+		git: &fakeGit{diff: "some diff"},
+		llm: &fakeLLM{err: errors.New("LLM failed")},
+		log: noopLogger(),
 	}
 	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "a", DestinationBranch: "b"})
 	if err == nil {
@@ -243,9 +249,9 @@ func TestPrService_LLMError(t *testing.T) {
 
 func TestCommitService_LLMError(t *testing.T) {
 	svc := Service{
-		Git: &fakeGit{diff: "some diff"},
-		LLM: &fakeLLM{err: errors.New("LLM failed")},
-		Log: noopLogger(),
+		git: &fakeGit{diff: "some diff"},
+		llm: &fakeLLM{err: errors.New("LLM failed")},
+		log: noopLogger(),
 	}
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err == nil {
@@ -258,10 +264,10 @@ func TestCommitService_LLMError(t *testing.T) {
 func TestDraftMessage_SingleShot_ReportsProgress(t *testing.T) {
 	fp := &fakeProgress{}
 	svc := Service{
-		Git:      &fakeGit{diff: "small diff"},
-		LLM:      &fakeLLM{response: "feat: thing"},
-		Log:      noopLogger(),
-		Progress: fp,
+		git:      &fakeGit{diff: "small diff"},
+		llm:      &fakeLLM{response: "feat: thing"},
+		log:      noopLogger(),
+		progress: fp,
 	}
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
@@ -284,11 +290,11 @@ func TestDraftMessage_MapReduce_ReportsChunkProgress(t *testing.T) {
 
 	fp := &fakeProgress{}
 	svc := Service{
-		Git:            &fakeGit{diff: diff.String()},
-		LLM:            &fakeLLM{response: "- bullet"},
-		Log:            noopLogger(),
-		Progress:       fp,
-		ChunkThreshold: 500,
+		git:            &fakeGit{diff: diff.String()},
+		llm:            &fakeLLM{response: "- bullet"},
+		log:            noopLogger(),
+		progress:       fp,
+		chunkThreshold: 500,
 	}
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
@@ -308,9 +314,9 @@ func TestDraftMessage_MapReduce_ReportsChunkProgress(t *testing.T) {
 func TestDraftBranchName_ReportsProgress(t *testing.T) {
 	fp := &fakeProgress{}
 	svc := Service{
-		LLM:      &fakeLLM{response: "feat/add-auth"},
-		Log:      noopLogger(),
-		Progress: fp,
+		llm:      &fakeLLM{response: "feat/add-auth"},
+		log:      noopLogger(),
+		progress: fp,
 	}
 	_, err := svc.DraftBranchName(context.Background(), BranchOptions{Task: "add auth"})
 	if err != nil {
@@ -327,10 +333,10 @@ func TestDraftBranchName_ReportsProgress(t *testing.T) {
 func TestDraftPrDescription_ReportsProgress(t *testing.T) {
 	fp := &fakeProgress{}
 	svc := Service{
-		Git:      &fakeGit{commits: []string{"feat: login"}},
-		LLM:      &fakeLLM{response: "PR desc"},
-		Log:      noopLogger(),
-		Progress: fp,
+		git:      &fakeGit{commits: []string{"feat: login"}},
+		llm:      &fakeLLM{response: "PR desc"},
+		log:      noopLogger(),
+		progress: fp,
 	}
 	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
 	if err != nil {
@@ -347,12 +353,15 @@ func TestDraftPrDescription_ReportsProgress(t *testing.T) {
 func TestDraftMessage_LLMError_StillCallsDone(t *testing.T) {
 	fp := &fakeProgress{}
 	svc := Service{
-		Git:      &fakeGit{diff: "diff"},
-		LLM:      &fakeLLM{err: errors.New("fail")},
-		Log:      noopLogger(),
-		Progress: fp,
+		git:      &fakeGit{diff: "diff"},
+		llm:      &fakeLLM{err: errors.New("fail")},
+		log:      noopLogger(),
+		progress: fp,
 	}
-	svc.DraftMessage(context.Background(), CommitOptions{})
+	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
+	if err == nil {
+		t.Error("DraftMessage with failing LLM must return an error, not panic")
+	}
 	if fp.doneCount() == 0 {
 		t.Error("expected Done to be called even on error (to clear the spinner)")
 	}
@@ -361,9 +370,9 @@ func TestDraftMessage_LLMError_StillCallsDone(t *testing.T) {
 func TestDraftMessage_NilProgress_DoesNotPanic(t *testing.T) {
 	// Progress is nil — the progress() accessor should return NoopProgress.
 	svc := Service{
-		Git: &fakeGit{diff: "diff"},
-		LLM: &fakeLLM{response: "msg"},
-		Log: noopLogger(),
+		git: &fakeGit{diff: "diff"},
+		llm: &fakeLLM{response: "msg"},
+		log: noopLogger(),
 	}
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
@@ -373,9 +382,9 @@ func TestDraftMessage_NilProgress_DoesNotPanic(t *testing.T) {
 
 func TestPrService_EmptyCommits_ReturnsErrEmptyPR(t *testing.T) {
 	svc := Service{
-		Git: &fakeGit{commits: []string{}},
-		LLM: &fakeLLM{},
-		Log: noopLogger(),
+		git: &fakeGit{commits: []string{}},
+		llm: &fakeLLM{},
+		log: noopLogger(),
 	}
 	_, err := svc.DraftPrDescription(context.Background(), PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"})
 	if !errors.Is(err, domain.ErrEmptyPR) {
@@ -386,72 +395,72 @@ func TestPrService_EmptyCommits_ReturnsErrEmptyPR(t *testing.T) {
 func TestNew_Defaults(t *testing.T) {
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger())
 
-	if svc.ChunkThreshold != DefaultChunkThreshold {
-		t.Errorf("ChunkThreshold: got %d, want %d", svc.ChunkThreshold, DefaultChunkThreshold)
+	if svc.ChunkThreshold() != DefaultChunkThreshold {
+		t.Errorf("ChunkThreshold: got %d, want %d", svc.ChunkThreshold(), DefaultChunkThreshold)
 	}
-	if svc.MaxConcurrency != DefaultServiceMaxConcurrency {
-		t.Errorf("MaxConcurrency: got %d, want %d", svc.MaxConcurrency, DefaultServiceMaxConcurrency)
+	if svc.concurrency() != DefaultServiceMaxConcurrency {
+		t.Errorf("MaxConcurrency: got %d, want %d", svc.concurrency(), DefaultServiceMaxConcurrency)
 	}
-	if svc.MaxRetries != 0 {
-		t.Errorf("MaxRetries: got %d, want 0", svc.MaxRetries)
+	if svc.MaxRetries() != 0 {
+		t.Errorf("MaxRetries: got %d, want 0", svc.MaxRetries())
 	}
-	if svc.RetryBaseDelay != 0 {
-		t.Errorf("RetryBaseDelay: got %v, want 0 (uses package default)", svc.RetryBaseDelay)
+	if svc.RetryBaseDelay() != defaultRetryBaseDelay {
+		t.Errorf("RetryBaseDelay: got %v, want %v (uses package default)", svc.RetryBaseDelay(), defaultRetryBaseDelay)
 	}
-	if svc.Progress != nil {
-		t.Error("Progress: expected nil (no-op) by default")
+	if _, ok := svc.Progress().(domain.NoopProgress); !ok {
+		t.Error("Progress: expected NoopProgress by default")
 	}
 }
 
 func TestNew_WithProgress(t *testing.T) {
 	fp := &fakeProgress{}
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithProgress(fp))
-	if svc.Progress != fp {
+	if svc.Progress() != fp {
 		t.Error("WithProgress: progress reporter not applied")
 	}
 }
 
 func TestNew_WithChunkThreshold(t *testing.T) {
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithChunkThreshold(8000))
-	if svc.ChunkThreshold != 8000 {
-		t.Errorf("WithChunkThreshold: got %d, want 8000", svc.ChunkThreshold)
+	if svc.ChunkThreshold() != 8000 {
+		t.Errorf("WithChunkThreshold: got %d, want 8000", svc.ChunkThreshold())
 	}
 }
 
 // WithChunkThreshold(0) must be a no-op — zero is not a valid threshold.
 func TestNew_WithChunkThreshold_ZeroIgnored(t *testing.T) {
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithChunkThreshold(0))
-	if svc.ChunkThreshold != DefaultChunkThreshold {
-		t.Errorf("WithChunkThreshold(0) should keep default %d, got %d", DefaultChunkThreshold, svc.ChunkThreshold)
+	if svc.ChunkThreshold() != DefaultChunkThreshold {
+		t.Errorf("WithChunkThreshold(0) should keep default %d, got %d", DefaultChunkThreshold, svc.ChunkThreshold())
 	}
 }
 
 func TestNew_WithMaxConcurrency(t *testing.T) {
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithMaxConcurrency(4))
-	if svc.MaxConcurrency != 4 {
-		t.Errorf("WithMaxConcurrency: got %d, want 4", svc.MaxConcurrency)
+	if svc.concurrency() != 4 {
+		t.Errorf("WithMaxConcurrency: got %d, want 4", svc.concurrency())
 	}
 }
 
 func TestNew_WithMaxRetries(t *testing.T) {
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithMaxRetries(3))
-	if svc.MaxRetries != 3 {
-		t.Errorf("WithMaxRetries: got %d, want 3", svc.MaxRetries)
+	if svc.MaxRetries() != 3 {
+		t.Errorf("WithMaxRetries: got %d, want 3", svc.MaxRetries())
 	}
 }
 
 // WithMaxRetries(0) is a valid value (no retries) and must be applied.
 func TestNew_WithMaxRetries_ZeroIsValid(t *testing.T) {
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithMaxRetries(5), WithMaxRetries(0))
-	if svc.MaxRetries != 0 {
-		t.Errorf("WithMaxRetries(0): got %d, want 0", svc.MaxRetries)
+	if svc.MaxRetries() != 0 {
+		t.Errorf("WithMaxRetries(0): got %d, want 0", svc.MaxRetries())
 	}
 }
 
 func TestNew_WithRetryBaseDelay(t *testing.T) {
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithRetryBaseDelay(500*time.Millisecond))
-	if svc.RetryBaseDelay != 500*time.Millisecond {
-		t.Errorf("WithRetryBaseDelay: got %v, want 500ms", svc.RetryBaseDelay)
+	if svc.RetryBaseDelay() != 500*time.Millisecond {
+		t.Errorf("WithRetryBaseDelay: got %v, want 500ms", svc.RetryBaseDelay())
 	}
 }
 
@@ -463,16 +472,16 @@ func TestNew_MultipleOptions_AppliedInOrder(t *testing.T) {
 		WithMaxRetries(2),
 		WithRetryBaseDelay(100*time.Millisecond),
 	)
-	if svc.ChunkThreshold != 1000 {
-		t.Errorf("ChunkThreshold: got %d, want 1000", svc.ChunkThreshold)
+	if svc.ChunkThreshold() != 1000 {
+		t.Errorf("ChunkThreshold: got %d, want 1000", svc.ChunkThreshold())
 	}
-	if svc.MaxConcurrency != 6 {
-		t.Errorf("MaxConcurrency: got %d, want 6", svc.MaxConcurrency)
+	if svc.concurrency() != 6 {
+		t.Errorf("MaxConcurrency: got %d, want 6", svc.concurrency())
 	}
-	if svc.MaxRetries != 2 {
-		t.Errorf("MaxRetries: got %d, want 2", svc.MaxRetries)
+	if svc.MaxRetries() != 2 {
+		t.Errorf("MaxRetries: got %d, want 2", svc.MaxRetries())
 	}
-	if svc.RetryBaseDelay != 100*time.Millisecond {
-		t.Errorf("RetryBaseDelay: got %v, want 100ms", svc.RetryBaseDelay)
+	if svc.RetryBaseDelay() != 100*time.Millisecond {
+		t.Errorf("RetryBaseDelay: got %v, want 100ms", svc.RetryBaseDelay())
 	}
 }

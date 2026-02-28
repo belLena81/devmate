@@ -79,11 +79,7 @@ func TestDraftMessage_LargeDiff_UsesMapReduce(t *testing.T) {
 		b.WriteString("+" + strings.Repeat("x", 200) + "\n")
 	}
 
-	svc := Service{
-		Git:            &fakeGit{diff: b.String()},
-		LLM:            fake,
-		ChunkThreshold: 500, // inject threshold so test controls it
-	}
+	svc := NewService(&fakeGit{diff: b.String()}, fake, &NoopCache{}, noopLogger(), 500)
 
 	_, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
