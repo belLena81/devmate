@@ -23,6 +23,7 @@ devmate commit
 devmate commit --detailed
 devmate commit --type fix
 devmate commit --explain
+devmate commit --no-cache
 ```
 
 | Flag | Description |
@@ -31,6 +32,7 @@ devmate commit --explain
 | `--short` | Single-line subject only (default) |
 | `--detailed` | Subject + body with bullet points |
 | `--explain` | Append reasoning to the output |
+| `--no-cache` | Bypass the cache and always call the LLM; overwrites the cached entry |
 
 `--short` and `--detailed` are mutually exclusive.
 
@@ -51,6 +53,7 @@ Drafts a branch name from a plain-text task description.
 ```sh
 devmate branch "add retry logic to payment webhook handler"
 devmate branch "fix login crash on empty password" --type fix
+devmate branch "add retry logic to payment webhook handler" --no-cache
 ```
 
 Output follows the `<type>/<slug>` convention:
@@ -65,6 +68,7 @@ feat/add-retry-logic-to-payment-webhook-handler
 | `--short` | Concise slug (default) |
 | `--detailed` | Longer, more descriptive slug |
 | `--explain` | Append reasoning to the output |
+| `--no-cache` | Bypass the cache and always call the LLM; overwrites the cached entry |
 
 ### `devmate pr <source> <target>`
 
@@ -73,6 +77,7 @@ Drafts a PR title and description from `git log` between two branches.
 ```sh
 devmate pr feat/payment-webhook-retry main
 devmate pr feat/payment-webhook-retry main --detailed
+devmate pr feat/payment-webhook-retry main --no-cache
 ```
 
 | Flag | Description |
@@ -81,6 +86,7 @@ devmate pr feat/payment-webhook-retry main --detailed
 | `--short` | Title + bullet summary (default) |
 | `--detailed` | Full description with technical decisions and risk notes |
 | `--explain` | Append reasoning to the output |
+| `--no-cache` | Bypass the cache and always call the LLM; overwrites the cached entry |
 
 Output includes a title, summary, technical decisions, and risk/impact notes.
 
@@ -209,6 +215,8 @@ This keeps every prompt within the model's context window regardless of reposito
 ## Caching
 
 Responses are cached to `~/.cache/devmate` (overridable via `cache.dir` or `DEVMATE_CACHE_DIR`). Cache keys are derived from: model name, binary hash, git input (diff or commit list), and all option flags. Changing any of these produces a new key. Changing the binary invalidates all prior entries automatically.
+
+Pass `--no-cache` to `commit`, `branch`, or `pr` to bypass the cache for a single run. The LLM is always called and its fresh response overwrites the existing cached entry, so subsequent ordinary calls immediately serve the updated value. Use this when you want a different suggestion for the same input without clearing the entire cache.
 
 Use `devmate cache stat` to inspect the cache and `devmate cache clean` to wipe it.
 

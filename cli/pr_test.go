@@ -13,6 +13,9 @@ func newPrApp() *App {
 	return app
 }
 
+// TestPrCmd_NilService_ReturnsErrServiceNotInitialized guards against a
+// nil-pointer panic when prService has not been wired in yet. This mirrors
+// the equivalent check in branch.go and (now) commit.go.
 func TestPrCmd_NilService_ReturnsErrServiceNotInitialized(t *testing.T) {
 	app := &App{} // all services nil
 	app.rootCmd = buildRootCmd(app)
@@ -151,21 +154,21 @@ func TestPrCmd_ValidTypes(t *testing.T) {
 // ─── NewPr unit tests ────────────────────────────────────────────────────────
 
 func TestNewPr_MissingSource(t *testing.T) {
-	_, err := NewPr("", "main", "", false, false, false)
+	_, err := NewPr("", "main", "", false, false, false, false)
 	if !errors.Is(err, domain.ErrMissingSourceBranch) {
 		t.Errorf("expected MissingSourceBranch, got %v", err)
 	}
 }
 
 func TestNewPr_MissingDestination(t *testing.T) {
-	_, err := NewPr("feature/foo", "", "", false, false, false)
+	_, err := NewPr("feature/foo", "", "", false, false, false, false)
 	if !errors.Is(err, domain.ErrMissingTargetBranch) {
 		t.Errorf("expected MissingTargetBranch, got %v", err)
 	}
 }
 
 func TestNewPr_ValidConstruction(t *testing.T) {
-	opts, err := NewPr("feature/foo", "main", "feat", false, false, false)
+	opts, err := NewPr("feature/foo", "main", "feat", false, false, false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -182,14 +185,80 @@ func TestNewPr_ValidConstruction(t *testing.T) {
 }
 
 func TestNewPr_InvalidType(t *testing.T) {
-	_, err := NewPr("feature/foo", "main", "invalid", false, false, false)
+	_, err := NewPr("feature/foo", "main", "invalid", false, false, false, false)
 	if !errors.Is(err, domain.ErrInvalidCmdType) {
 		t.Errorf("expected ErrInvalidCmdType, got %v", err)
 	}
 }
 
+// ─── --no-cache flag ──────────────────────────────────────────────────────────
+
+func TestPrCmd_NoCacheFlag_IsRegistered(t *testing.T) {
+	app := newPrApp()
+	cmd, _, _ := app.rootCmd.Find([]string{"pr"})
+	if cmd.Flags().Lookup("no-cache") == nil {
+		t.Error("missing --no-cache flag on pr command")
+	}
+}
+
+func TestPrCmd_NoCacheFlag_DefaultIsFalse(t *testing.T) {
+	app := newPrApp()
+	cmd, _, _ := app.rootCmd.Find([]string{"pr"})
+	if cmd.Flags().Lookup("no-cache").DefValue != "false" {
+		t.Error("--no-cache default should be false")
+	}
+}
+
+func TestNewPr_NoCacheTrue_PropagatedToOptions(t *testing.T) {
+	opts, err := NewPr("feature/foo", "main", "", false, false, false, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.NoCache {
+		t.Error("expected NoCache=true when noCache argument is true")
+	}
+}
+
+func TestNewPr_NoCacheFalse_DefaultBehaviour(t *testing.T) {
+	opts, err := NewPr("feature/foo", "main", "", false, false, false, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.NoCache {
+		t.Error("expected NoCache=false by default")
+	}
+}
+
+func TestPrCmd_NoCacheFlag_PropagatesNoCache(t *testing.T) {
+	spy := &fakePrService{}
+	app := newPrApp()
+	InjectPrService(app, spy)
+	app.rootCmd.SetArgs([]string{"pr", "--no-cache", "feature/x", "main"})
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !spy.options.NoCache {
+		t.Error("expected NoCache=true to be passed to service when --no-cache is set")
+	}
+}
+
+func TestPrCmd_WithoutNoCacheFlag_NoCacheIsFalse(t *testing.T) {
+	spy := &fakePrService{}
+	app := newPrApp()
+	InjectPrService(app, spy)
+	app.rootCmd.SetArgs([]string{"pr", "feature/x", "main"})
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spy.options.NoCache {
+		t.Error("expected NoCache=false when --no-cache is not set")
+	}
+}
+
 func TestPrCmd_ArgOrder_SourceFirst_DestinationSecond(t *testing.T) {
-	opts, err := NewPr("feature/login", "main", "", false, false, false)
+	opts, err := NewPr("feature/login", "main", "", false, false, false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

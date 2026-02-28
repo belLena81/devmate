@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewBranch(task string, cmdType string, short, detailed, explain bool) (service.BranchOptions, error) {
+func NewBranch(task string, cmdType string, short, detailed, explain, noCache bool) (service.BranchOptions, error) {
 	ct, err := parseCmdType(cmdType)
 	if err != nil {
 		return service.BranchOptions{}, err
@@ -17,7 +17,7 @@ func NewBranch(task string, cmdType string, short, detailed, explain bool) (serv
 	if task == "" {
 		return service.BranchOptions{}, domain.ErrMissingTaskDescription
 	}
-	return service.BranchOptions{Task: task, Options: domain.Options{Type: ct, Mode: parseCmdMode(detailed), Explain: explain}}, nil
+	return service.BranchOptions{Task: task, Options: domain.Options{Type: ct, Mode: parseCmdMode(detailed), Explain: explain, NoCache: noCache}}, nil
 }
 
 type BranchService interface {
@@ -26,10 +26,10 @@ type BranchService interface {
 
 func newBranchCmd(a *App) *cobra.Command {
 	var rawCmdType string
-	var explain, rawShort, rawDetailed bool
+	var explain, rawShort, rawDetailed, noCache bool
 
 	validateAndRunBranch := func(cmd *cobra.Command, args []string) error {
-		branchOpts, err := NewBranch(args[0], rawCmdType, rawShort, rawDetailed, explain)
+		branchOpts, err := NewBranch(args[0], rawCmdType, rawShort, rawDetailed, explain, noCache)
 		if err != nil {
 			return err
 		}
@@ -46,7 +46,7 @@ func newBranchCmd(a *App) *cobra.Command {
 	}
 
 	branchCmd := &cobra.Command{
-		Use:   "branch [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] text",
+		Use:   "branch [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] [--no-cache] text",
 		Short: "Create a branch name from the given task description",
 		Long: `Generates a branch name from a plain-text task description.
 
@@ -65,6 +65,8 @@ Flags:
       --explain         Provide reasoning behind the suggested branch name
       --short           Generate a concise branch name (default)
       --detailed        Generate a more descriptive branch name
+      --no-cache        Bypass the response cache and always call the LLM;
+                        the fresh response overwrites any existing cached entry
 
 Note:
   --short and --detailed are mutually exclusive.
@@ -101,6 +103,13 @@ Note:
 		"detailed",
 		false,
 		"generate detailed verbose branch name",
+	)
+
+	branchCmd.Flags().BoolVar(
+		&noCache,
+		"no-cache",
+		false,
+		"bypass the response cache and always call the LLM",
 	)
 
 	// Make short and detailed mutually exclusive

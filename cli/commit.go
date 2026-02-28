@@ -9,12 +9,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewCommit(cmdType string, short, detailed, explain bool) (service.CommitOptions, error) {
+func NewCommit(cmdType string, short, detailed, explain, noCache bool) (service.CommitOptions, error) {
 	ct, err := parseCmdType(cmdType)
 	if err != nil {
 		return service.CommitOptions{}, err
 	}
-	return service.CommitOptions{Options: domain.Options{Type: ct, Mode: parseCmdMode(detailed), Explain: explain}}, nil
+	return service.CommitOptions{Options: domain.Options{Type: ct, Mode: parseCmdMode(detailed), Explain: explain, NoCache: noCache}}, nil
 }
 
 type CommitService interface {
@@ -23,10 +23,10 @@ type CommitService interface {
 
 func newCommitCmd(a *App) *cobra.Command {
 	var rawCmdType string
-	var explain, rawShort, rawDetailed bool
+	var explain, rawShort, rawDetailed, noCache bool
 
 	validateAndRunCommit := func(cmd *cobra.Command, args []string) error {
-		commitOpts, err := NewCommit(rawCmdType, rawShort, rawDetailed, explain)
+		commitOpts, err := NewCommit(rawCmdType, rawShort, rawDetailed, explain, noCache)
 		if err != nil {
 			return err
 		}
@@ -42,7 +42,7 @@ func newCommitCmd(a *App) *cobra.Command {
 	}
 
 	commitCmd := &cobra.Command{
-		Use:   "commit [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain]",
+		Use:   "commit [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] [--no-cache]",
 		Short: "Create a commit message from the given diff",
 		Long: `Analyzes staged changes (git diff --cached) and drafts a Conventional Commit message.
 
@@ -60,6 +60,8 @@ Flags:
       --explain         Provide reasoning behind the suggested commit message
       --short           Generate a concise commit message (default)
       --detailed        Generate a more descriptive commit message
+      --no-cache        Bypass the response cache and always call the LLM;
+                        the fresh response overwrites any existing cached entry
 
 Note:
   --short and --detailed are mutually exclusive.
@@ -96,6 +98,13 @@ Note:
 		"detailed",
 		false,
 		"generate detailed commit message with body",
+	)
+
+	commitCmd.Flags().BoolVar(
+		&noCache,
+		"no-cache",
+		false,
+		"bypass the response cache and always call the LLM",
 	)
 
 	// Make short and detailed mutually exclusive

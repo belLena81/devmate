@@ -116,14 +116,14 @@ func TestBranchCmd_ValidTypes(t *testing.T) {
 }
 
 func TestNewBranch_MissingTask(t *testing.T) {
-	_, err := NewBranch("", "", false, false, false)
+	_, err := NewBranch("", "", false, false, false, false)
 	if !errors.Is(err, domain.ErrMissingTaskDescription) {
 		t.Errorf("expected MissingTaskDescription, got %v", err)
 	}
 }
 
 func TestNewBranch_ValidConstruction(t *testing.T) {
-	opts, err := NewBranch("add auth", "feat", false, false, false)
+	opts, err := NewBranch("add auth", "feat", false, false, false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -136,8 +136,74 @@ func TestNewBranch_ValidConstruction(t *testing.T) {
 }
 
 func TestNewBranch_InvalidType(t *testing.T) {
-	_, err := NewBranch("task", "invalid", false, false, false)
+	_, err := NewBranch("task", "invalid", false, false, false, false)
 	if !errors.Is(err, domain.ErrInvalidCmdType) {
 		t.Errorf("expected ErrInvalidCmdType, got %v", err)
+	}
+}
+
+// ─── --no-cache flag ──────────────────────────────────────────────────────────
+
+func TestBranchCmd_NoCacheFlag_IsRegistered(t *testing.T) {
+	app := newBranchApp()
+	cmd, _, _ := app.rootCmd.Find([]string{"branch"})
+	if cmd.Flags().Lookup("no-cache") == nil {
+		t.Error("missing --no-cache flag on branch command")
+	}
+}
+
+func TestBranchCmd_NoCacheFlag_DefaultIsFalse(t *testing.T) {
+	app := newBranchApp()
+	cmd, _, _ := app.rootCmd.Find([]string{"branch"})
+	if cmd.Flags().Lookup("no-cache").DefValue != "false" {
+		t.Error("--no-cache default should be false")
+	}
+}
+
+func TestNewBranch_NoCacheTrue_PropagatedToOptions(t *testing.T) {
+	opts, err := NewBranch("add auth", "feat", false, false, false, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.NoCache {
+		t.Error("expected NoCache=true when noCache argument is true")
+	}
+}
+
+func TestNewBranch_NoCacheFalse_DefaultBehaviour(t *testing.T) {
+	opts, err := NewBranch("add auth", "", false, false, false, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.NoCache {
+		t.Error("expected NoCache=false by default")
+	}
+}
+
+func TestBranchCmd_NoCacheFlag_PropagatesNoCache(t *testing.T) {
+	spy := &fakeBranchService{}
+	app := newBranchApp()
+	InjectBranchService(app, spy)
+	app.rootCmd.SetArgs([]string{"branch", "--no-cache", "add auth feature"})
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !spy.options.NoCache {
+		t.Error("expected NoCache=true to be passed to service when --no-cache is set")
+	}
+}
+
+func TestBranchCmd_WithoutNoCacheFlag_NoCacheIsFalse(t *testing.T) {
+	spy := &fakeBranchService{}
+	app := newBranchApp()
+	InjectBranchService(app, spy)
+	app.rootCmd.SetArgs([]string{"branch", "add auth feature"})
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spy.options.NoCache {
+		t.Error("expected NoCache=false when --no-cache is not set")
 	}
 }

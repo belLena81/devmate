@@ -17,6 +17,9 @@ func newCommitApp(svc CommitService) *App {
 	return app
 }
 
+// TestCommitCmd_NilService_ReturnsErrServiceNotInitialized guards against a
+// nil-pointer panic when commitService has not been wired in yet. This mirrors
+// the equivalent check that exists in branch.go and pr.go.
 func TestCommitCmd_NilService_ReturnsErrServiceNotInitialized(t *testing.T) {
 	app := &App{} // all services nil
 	app.rootCmd = buildRootCmd(app)
@@ -125,7 +128,7 @@ func TestCommitCmd_ValidTypes(t *testing.T) {
 }
 
 func TestNewCommit_ValidType(t *testing.T) {
-	opts, err := NewCommit("feat", false, false, false)
+	opts, err := NewCommit("feat", false, false, false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -190,7 +193,7 @@ func TestCommitCmd_PassesExplainFlag(t *testing.T) {
 }
 
 func TestNewCommit_DefaultMode_IsShort(t *testing.T) {
-	opts, err := NewCommit("", false, false, false)
+	opts, err := NewCommit("", false, false, false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -200,7 +203,7 @@ func TestNewCommit_DefaultMode_IsShort(t *testing.T) {
 }
 
 func TestNewCommit_DetailedMode(t *testing.T) {
-	opts, err := NewCommit("", false, true, false)
+	opts, err := NewCommit("", false, true, false, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -210,9 +213,73 @@ func TestNewCommit_DetailedMode(t *testing.T) {
 }
 
 func TestNewCommit_InvalidType_ReturnsError(t *testing.T) {
-	_, err := NewCommit("invalid", false, false, false)
+	_, err := NewCommit("invalid", false, false, false, false)
 	if !errors.Is(err, domain.ErrInvalidCmdType) {
 		t.Errorf("expected ErrInvalidCmdType, got %v", err)
+	}
+}
+
+// ─── --no-cache flag ──────────────────────────────────────────────────────────
+
+func TestCommitCmd_NoCacheFlag_IsRegistered(t *testing.T) {
+	app := newCommitApp(&fakeCommitService{})
+	cmd, _, _ := app.rootCmd.Find([]string{"commit"})
+	if cmd.Flags().Lookup("no-cache") == nil {
+		t.Error("missing --no-cache flag on commit command")
+	}
+}
+
+func TestCommitCmd_NoCacheFlag_DefaultIsFalse(t *testing.T) {
+	app := newCommitApp(&fakeCommitService{})
+	cmd, _, _ := app.rootCmd.Find([]string{"commit"})
+	if cmd.Flags().Lookup("no-cache").DefValue != "false" {
+		t.Error("--no-cache default should be false")
+	}
+}
+
+func TestNewCommit_NoCacheTrue_PropagatedToOptions(t *testing.T) {
+	opts, err := NewCommit("", false, false, false, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !opts.NoCache {
+		t.Error("expected NoCache=true when noCache argument is true")
+	}
+}
+
+func TestNewCommit_NoCacheFalse_DefaultBehaviour(t *testing.T) {
+	opts, err := NewCommit("", false, false, false, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.NoCache {
+		t.Error("expected NoCache=false by default")
+	}
+}
+
+func TestCommitCmd_NoCacheFlag_PropagatesNoCache(t *testing.T) {
+	fake := &fakeCommitService{}
+	app := newCommitApp(fake)
+	app.rootCmd.SetArgs([]string{"commit", "--no-cache"})
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !fake.options.NoCache {
+		t.Error("expected NoCache=true to be passed to service when --no-cache is set")
+	}
+}
+
+func TestCommitCmd_WithoutNoCacheFlag_NoCacheIsFalse(t *testing.T) {
+	fake := &fakeCommitService{}
+	app := newCommitApp(fake)
+	app.rootCmd.SetArgs([]string{"commit"})
+
+	if err := app.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if fake.options.NoCache {
+		t.Error("expected NoCache=false when --no-cache is not set")
 	}
 }
 

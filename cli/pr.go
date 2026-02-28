@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewPr(source, target string, cmdType string, short, detailed, explain bool) (service.PrOptions, error) {
+func NewPr(source, target string, cmdType string, short, detailed, explain, noCache bool) (service.PrOptions, error) {
 	ct, err := parseCmdType(cmdType)
 	if err != nil {
 		return service.PrOptions{}, err
@@ -23,7 +23,7 @@ func NewPr(source, target string, cmdType string, short, detailed, explain bool)
 	return service.PrOptions{
 		SourceBranch:      source,
 		DestinationBranch: target,
-		Options:           domain.Options{Type: ct, Mode: parseCmdMode(detailed), Explain: explain},
+		Options:           domain.Options{Type: ct, Mode: parseCmdMode(detailed), Explain: explain, NoCache: noCache},
 	}, nil
 }
 
@@ -33,10 +33,10 @@ type PrService interface {
 
 func newPrCmd(a *App) *cobra.Command {
 	var rawCmdType string
-	var explain, rawShort, rawDetailed bool
+	var explain, rawShort, rawDetailed, noCache bool
 
 	validateAndRunPr := func(cmd *cobra.Command, args []string) error {
-		prOpts, err := NewPr(args[0], args[1], rawCmdType, rawShort, rawDetailed, explain)
+		prOpts, err := NewPr(args[0], args[1], rawCmdType, rawShort, rawDetailed, explain, noCache)
 		if err != nil {
 			return err
 		}
@@ -51,7 +51,7 @@ func newPrCmd(a *App) *cobra.Command {
 		return nil
 	}
 	prCmd := &cobra.Command{
-		Use:   "pr [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] target source",
+		Use:   "pr [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] [--no-cache] target source",
 		Short: "Create a pr text from git log between heads given branch names",
 		Long: `Generates pull request title and description from the git log between two branches.
 
@@ -75,6 +75,8 @@ Flags:
       --explain         Provide reasoning behind the generated PR description
       --short           Generate a concise PR title and summary (default)
       --detailed        Generate a detailed PR description with full change breakdown
+      --no-cache        Bypass the response cache and always call the LLM;
+                        the fresh response overwrites any existing cached entry
 
 Note:
   --short and --detailed are mutually exclusive.
@@ -111,6 +113,13 @@ Note:
 		"detailed",
 		false,
 		"generate detailed verbose pr description",
+	)
+
+	prCmd.Flags().BoolVar(
+		&noCache,
+		"no-cache",
+		false,
+		"bypass the response cache and always call the LLM",
 	)
 
 	// Make short and detailed mutually exclusive

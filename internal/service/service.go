@@ -498,9 +498,11 @@ func (s *Service) DraftMessage(ctx context.Context, o CommitOptions) (string, er
 	s.log().Debug("got diff", "bytes", len(diff))
 
 	key := commitCacheKey(s.Model, s.BinaryHash, diff, typeStr, modeStr, o.Explain)
-	if hit, ok := s.cache().Get(key); ok {
-		s.log().Debug("commit message cache hit")
-		return hit, nil
+	if !o.NoCache {
+		if hit, ok := s.cache().Get(key); ok {
+			s.log().Debug("commit message cache hit")
+			return hit, nil
+		}
 	}
 
 	var result string
@@ -537,9 +539,11 @@ func (s *Service) DraftBranchName(ctx context.Context, o BranchOptions) (string,
 	s.log().Debug("drafting branch name", "task", o.Task, "type", typeStr, "mode", modeStr)
 
 	key := branchCacheKey(s.Model, s.BinaryHash, o.Task, typeStr, modeStr, o.Explain)
-	if hit, ok := s.cache().Get(key); ok {
-		s.log().Debug("branch name cache hit")
-		return hit, nil
+	if !o.NoCache {
+		if hit, ok := s.cache().Get(key); ok {
+			s.log().Debug("branch name cache hit")
+			return hit, nil
+		}
 	}
 
 	s.progress().Status("Generating branch name...")
@@ -580,9 +584,11 @@ func (s *Service) DraftPrDescription(ctx context.Context, o PrOptions) (string, 
 	}
 
 	key := prCacheKey(s.Model, s.BinaryHash, commits, typeStr, modeStr, o.Explain)
-	if hit, ok := s.cache().Get(key); ok {
-		s.log().Debug("pr description cache hit")
-		return hit, nil
+	if !o.NoCache {
+		if hit, ok := s.cache().Get(key); ok {
+			s.log().Debug("pr description cache hit")
+			return hit, nil
+		}
 	}
 
 	var result string
