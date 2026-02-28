@@ -97,3 +97,61 @@ func TestDiskCache_CreatesDirectoryIfMissing(t *testing.T) {
 		t.Errorf("cache dir should exist after Set: %v", err)
 	}
 }
+
+// ─── validCacheKey ────────────────────────────────────────────────────────────
+
+func TestDiskCache_EmptyKey_SetReturnsError(t *testing.T) {
+	c := newTestCache(t)
+	if err := c.Set("", "v"); err == nil {
+		t.Error("expected error for empty key")
+	}
+}
+
+func TestDiskCache_EmptyKey_GetReturnsMiss(t *testing.T) {
+	c := newTestCache(t)
+	if _, ok := c.Get(""); ok {
+		t.Error("expected miss for empty key")
+	}
+}
+
+func TestDiskCache_PathSeparator_SetReturnsError(t *testing.T) {
+	c := newTestCache(t)
+	for _, bad := range []string{"a/b", "a\\b", "../etc/passwd", "sub/dir/key"} {
+		if err := c.Set(bad, "v"); err == nil {
+			t.Errorf("expected error for key %q containing path separator", bad)
+		}
+	}
+}
+
+func TestDiskCache_DotKeys_SetReturnsError(t *testing.T) {
+	c := newTestCache(t)
+	for _, bad := range []string{".", ".."} {
+		if err := c.Set(bad, "v"); err == nil {
+			t.Errorf("expected error for reserved key %q", bad)
+		}
+	}
+}
+
+func TestDiskCache_NullByte_SetReturnsError(t *testing.T) {
+	c := newTestCache(t)
+	if err := c.Set("key\x00suffix", "v"); err == nil {
+		t.Error("expected error for key containing null byte")
+	}
+}
+
+func TestDiskCache_ValidHexKey_RoundTrips(t *testing.T) {
+	// SHA-256 hex keys — the real-world format produced by buildCacheKey —
+	// must be accepted without error.
+	hexKey := "a3f1c9e2b7d084561f2a3c4e5d6b7890abcdef1234567890abcdef1234567890"
+	c := newTestCache(t)
+	if err := c.Set(hexKey, "value"); err != nil {
+		t.Fatalf("unexpected error for valid hex key: %v", err)
+	}
+	val, ok := c.Get(hexKey)
+	if !ok {
+		t.Fatal("expected hit for valid hex key")
+	}
+	if val != "value" {
+		t.Errorf("expected %q, got %q", "value", val)
+	}
+}

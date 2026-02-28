@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,6 +13,11 @@ import (
 )
 
 const generatePath = "/api/generate"
+
+// maxResponseBytes is the upper bound on how many bytes we read from a single
+// Ollama /api/generate response body. 10 MiB covers any realistic LLM output
+// while preventing a misbehaving or malicious server from exhausting memory.
+const maxResponseBytes = 10 << 20 // 10 MiB
 
 // OllamaClient calls a local Ollama server to generate text.
 // It implements domain.LLM.
@@ -164,7 +170,7 @@ func (c *OllamaClient) doGenerate(ctx context.Context, body []byte) (string, err
 	}
 
 	var result generateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&result); err != nil {
 		return "", fmt.Errorf("ollama: decode response: %w", err)
 	}
 

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,8 +25,9 @@ type Cache interface {
 }
 
 // DiskCache stores each cache entry as a file in a directory.
-// The filename is the cache key. This makes the cache trivially inspectable
-// with standard tools and allows individual entries to be deleted manually.
+// The filename is the cache key, which must be a valid filename component
+// (no path separators or null bytes). In practice all keys are lowercase
+// hex-encoded SHA-256 digests produced by buildCacheKey.
 //
 // Location follows the XDG cache convention: ~/.cache/devmate/
 type DiskCache struct {
@@ -38,7 +40,33 @@ func NewDiskCache(dir string) *DiskCache {
 	return &DiskCache{dir: dir}
 }
 
+// validCacheKey returns an error if key cannot be used as a plain filename
+// component. The check is intentionally strict: only printable ASCII that
+// cannot confuse filepath.Join or the OS is allowed. All keys produced by
+// buildCacheKey (hex SHA-256) satisfy this constraint trivially.
+func validCacheKey(key string) error {
+	if key == "" {
+		return fmt.Errorf("cache key must not be empty")
+	}
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		// Reject path separators, null bytes, and non-printable ASCII.
+		if c == '/' || c == '\\' || c == 0 || c < 0x20 || c == 0x7f {
+			return fmt.Errorf("cache key contains invalid character %q at index %d", rune(c), i)
+		}
+	}
+	// Guard against dot-relative paths (".", "..") that filepath.Join would
+	// resolve to the cache directory itself or its parent.
+	if key == "." || key == ".." {
+		return fmt.Errorf("cache key %q is a reserved path component", key)
+	}
+	return nil
+}
+
 func (c *DiskCache) Get(key string) (string, bool) {
+	if err := validCacheKey(key); err != nil {
+		return "", false
+	}
 	data, err := os.ReadFile(filepath.Join(c.dir, key))
 	if err != nil {
 		return "", false
@@ -47,6 +75,9 @@ func (c *DiskCache) Get(key string) (string, bool) {
 }
 
 func (c *DiskCache) Set(key, value string) error {
+	if err := validCacheKey(key); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
 		return err
 	}

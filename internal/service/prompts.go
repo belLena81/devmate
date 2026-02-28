@@ -29,6 +29,20 @@ var reduceTmpl string
 //go:embed _resources/pr_synthesis.tmpl
 var prSynthesisTmpl string
 
+// Parsed templates — compiled exactly once at package init from the embedded
+// strings above. Parsing on every mustRender call re-compiled seven templates
+// per LLM invocation with zero benefit; moving it here makes the cost pay-once
+// and surfaces any template syntax errors at startup rather than mid-request.
+var (
+	commitT      = template.Must(template.New("commit").Parse(commitTmpl))
+	branchT      = template.Must(template.New("branch").Parse(branchTmpl))
+	prT          = template.Must(template.New("pr").Parse(prTmpl))
+	chunkT       = template.Must(template.New("chunk").Parse(chunkTmpl))
+	synthesisT   = template.Must(template.New("synthesis").Parse(synthesisTmpl))
+	reduceT      = template.Must(template.New("reduce").Parse(reduceTmpl))
+	prSynthesisT = template.Must(template.New("pr_synthesis").Parse(prSynthesisTmpl))
+)
+
 // commitData holds the values injected into commit.tmpl.
 type commitData struct {
 	TypeOverride string // empty when type is auto-detected
@@ -79,7 +93,7 @@ type synthesisData struct {
 
 func BuildCommitPrompt(diff string, o CommitOptions) string {
 	typeStr, _ := o.Type.String()
-	return mustRender("commit", commitTmpl, commitData{
+	return mustRender(commitT, commitData{
 		TypeOverride: typeStr,
 		Detailed:     o.Mode == domain.Detailed,
 		Explain:      o.Explain,
@@ -89,7 +103,7 @@ func BuildCommitPrompt(diff string, o CommitOptions) string {
 
 func BuildBranchPrompt(o BranchOptions) string {
 	typeStr, _ := o.Type.String()
-	return mustRender("branch", branchTmpl, branchData{
+	return mustRender(branchT, branchData{
 		TypeOverride: typeStr,
 		Detailed:     o.Mode == domain.Detailed,
 		Explain:      o.Explain,
@@ -99,7 +113,7 @@ func BuildBranchPrompt(o BranchOptions) string {
 
 func BuildPrPrompt(commits []string, o PrOptions) string {
 	typeStr, _ := o.Type.String()
-	return mustRender("pr", prTmpl, prData{
+	return mustRender(prT, prData{
 		TypeOverride:      typeStr,
 		Detailed:          o.Mode == domain.Detailed,
 		Explain:           o.Explain,
@@ -112,7 +126,7 @@ func BuildPrPrompt(commits []string, o PrOptions) string {
 // BuildChunkPrompt builds the map-step prompt for summarising one chunk of a
 // large diff. chunk and total tell the model it is seeing a partial view.
 func BuildChunkPrompt(diff string, chunk, total int) string {
-	return mustRender("chunk", chunkTmpl, chunkData{
+	return mustRender(chunkT, chunkData{
 		Chunk: chunk,
 		Total: total,
 		Diff:  diff,
@@ -129,7 +143,7 @@ func BuildSynthesisPrompt(summaries []string, cmdType domain.CmdType, mode domai
 		numbered[i] = numberedSummary{N: i + 1, Text: s}
 	}
 
-	return mustRender("synthesis", synthesisTmpl, synthesisData{
+	return mustRender(synthesisT, synthesisData{
 		TypeOverride: typeStr,
 		Detailed:     mode == domain.Detailed,
 		Explain:      explain,
@@ -146,7 +160,7 @@ func BuildReducePrompt(summaries []string) string {
 		numbered[i] = numberedSummary{N: i + 1, Text: s}
 	}
 
-	return mustRender("reduce", reduceTmpl, synthesisData{
+	return mustRender(reduceT, synthesisData{
 		Summaries: numbered,
 	})
 }
@@ -171,7 +185,7 @@ func BuildPrSynthesisPrompt(summaries []string, o PrOptions) string {
 		numbered[i] = numberedSummary{N: i + 1, Text: s}
 	}
 
-	return mustRender("pr_synthesis", prSynthesisTmpl, prSynthesisData{
+	return mustRender(prSynthesisT, prSynthesisData{
 		TypeOverride:      typeStr,
 		Detailed:          o.Mode == domain.Detailed,
 		Explain:           o.Explain,
@@ -181,14 +195,13 @@ func BuildPrSynthesisPrompt(summaries []string, o PrOptions) string {
 	})
 }
 
-// mustRender executes a template and returns the result as a string.
-// Panics on parse or execution error — both indicate a programmer error
-// (malformed template embedded at compile time) not a runtime condition.
-func mustRender(name, tmpl string, data any) string {
-	t := template.Must(template.New(name).Parse(tmpl))
+// mustRender executes a pre-parsed template and returns the result as a string.
+// Panics on execution error — this indicates a data/template contract violation,
+// which is a programmer error, not a runtime condition.
+func mustRender(t *template.Template, data any) string {
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, data); err != nil {
-		panic("prompt template " + name + " failed to render: " + err.Error())
+		panic("prompt template " + t.Name() + " failed to render: " + err.Error())
 	}
 	return strings.TrimSpace(buf.String()) + "\n"
 }
