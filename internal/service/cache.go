@@ -8,8 +8,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Cache is a simple key-value store for LLM responses.
@@ -99,6 +101,65 @@ func (c *DiskCache) Clear() error {
 	}
 	return nil
 }
+
+// CacheEntry holds metadata for a single cached response.
+// The Key is the opaque hex-encoded SHA-256 digest that identifies the entry.
+// SizeBytes is the byte length of the cached value.
+// ModTime is when the entry was last written (i.e. when the LLM responded).
+type CacheEntry struct {
+	Key       string
+	SizeBytes int64
+	ModTime   time.Time
+}
+
+// CacheInspector is an optional capability for Cache implementations that
+// support listing all stored entries. It is separate from Cache so that the
+// minimal Cache interface stays small and NoopCache stays trivial.
+type CacheInspector interface {
+	// Stat returns metadata for every entry currently in the cache,
+	// sorted by modification time, newest first. An empty cache returns
+	// ([]CacheEntry{}, nil) — never (nil, nil).
+	Stat() ([]CacheEntry, error)
+}
+
+// Stat implements CacheInspector for DiskCache.
+// It reads directory entries without loading file contents, so it is cheap
+// even for large cached values.
+func (c *DiskCache) Stat() ([]CacheEntry, error) {
+	entries, err := os.ReadDir(c.dir)
+	if os.IsNotExist(err) {
+		return []CacheEntry{}, nil // empty cache is not an error
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]CacheEntry, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue // the cache dir should only contain flat files, but be safe
+		}
+		info, err := e.Info()
+		if err != nil {
+			return nil, fmt.Errorf("cache stat %q: %w", e.Name(), err)
+		}
+		result = append(result, CacheEntry{
+			Key:       e.Name(),
+			SizeBytes: info.Size(),
+			ModTime:   info.ModTime(),
+		})
+	}
+
+	// Sort newest first so the most recently used entries appear at the top.
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].ModTime.After(result[j].ModTime)
+	})
+
+	return result, nil
+}
+
+// Stat on NoopCache always returns an empty list; there is nothing to inspect.
+func (NoopCache) Stat() ([]CacheEntry, error) { return []CacheEntry{}, nil }
 
 // buildCacheKey computes a cache key from a template fingerprint plus a
 // variable number of input fields. It uses length-prefixed encoding so that

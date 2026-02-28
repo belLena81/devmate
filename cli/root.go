@@ -17,5 +17,6 @@ and open pull requests with consistent naming conventions.`,
 	root.AddCommand(newCommitCmd(app))
 	root.AddCommand(newBranchCmd(app))
 	root.AddCommand(newPrCmd(app))
+	root.AddCommand(newCacheCmd(app))
 	return root
 }

@@ -77,6 +77,9 @@ func noopLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// TestNewAppWithService_DoesNotMutateService asserts that NewAppWithService
+// does not modify any field of the Service it receives. The caller (main.go)
+// retains full ownership of the service after construction.
 func TestNewAppWithService_DoesNotMutateService(t *testing.T) {
 	svc := &service.Service{
 		LLM:   &stubLLM{},
@@ -136,7 +139,48 @@ func TestNewAppWithService_ReturnsNonNilApp(t *testing.T) {
 // Subcommand registration
 // ---------------------------------------------------------------------------
 
-func TestApp_CommitCmd_IsRegistered(t *testing.T) {
+func TestApp_CacheCmd_IsRegistered(t *testing.T) {
+	cmd, _, err := newApp(t).RootCmd().Find([]string{"cache"})
+	if err != nil || cmd.Name() != "cache" {
+		t.Fatal("cache command not registered")
+	}
+}
+
+func TestApp_CacheCleanCmd_IsRegistered(t *testing.T) {
+	cmd, _, err := newApp(t).RootCmd().Find([]string{"cache", "clean"})
+	if err != nil || cmd.Name() != "clean" {
+		t.Fatal("cache clean command not registered")
+	}
+}
+
+func TestApp_CacheStatCmd_IsRegistered(t *testing.T) {
+	cmd, _, err := newApp(t).RootCmd().Find([]string{"cache", "stat"})
+	if err != nil || cmd.Name() != "stat" {
+		t.Fatal("cache stat command not registered")
+	}
+}
+
+// TestNewAppWithService_CacheService_DerivedFromServiceCache asserts that
+// NewAppWithService automatically derives the cacheService from svc.Cache so
+// callers do not need to wire it manually.
+func TestNewAppWithService_CacheService_DerivedFromServiceCache(t *testing.T) {
+	svc := &service.Service{
+		LLM:   &stubLLM{},
+		Cache: service.NoopCache{},
+		Log:   noopLogger(),
+	}
+	app, err := cli.NewAppWithService(svc)
+	if err != nil {
+		t.Fatalf("NewAppWithService: %v", err)
+	}
+
+	// cache stat should work (returning empty list) without any additional wiring.
+	var buf bytes.Buffer
+	app.RootCmd().SetOut(&buf)
+	app.RootCmd().SetArgs([]string{"cache", "stat"})
+	if err := app.Execute(); err != nil {
+		t.Fatalf("cache stat with NoopCache: %v", err)
+	}
 	cmd, _, err := newApp(t).RootCmd().Find([]string{"commit"})
 	if err != nil || cmd.Name() != "commit" {
 		t.Fatal("commit command not registered")
