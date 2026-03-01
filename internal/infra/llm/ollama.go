@@ -38,14 +38,6 @@ func WithLogger(log *slog.Logger) Option {
 	return func(c *OllamaClient) { c.log = log.With("component", "ollama") }
 }
 
-// WithRequestTimeout sets the per-request timeout.
-func WithRequestTimeout(d time.Duration) Option {
-	return func(c *OllamaClient) { c.requestTimeout = d }
-}
-func WithMaxResponseBytes(n int64) Option {
-	return func(c *OllamaClient) { c.maxResponseBytes = n }
-}
-
 // NewOllamaClient returns a ready-to-use OllamaClient.
 // Call with no arguments for sensible defaults; use Option functions to override.
 // In production, prefer NewOllamaClientFromConfig to wire all settings from Config.

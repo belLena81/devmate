@@ -22,10 +22,6 @@ var ErrMissingSourceBranch = errors.New("missing source branch")
 // target-branch argument.
 var ErrMissingTargetBranch = errors.New("missing target branch")
 
-// ErrBranchDoesNotExist is returned when a requested branch cannot be found in
-// the repository.
-var ErrBranchDoesNotExist = errors.New("branch does not exist")
-
 // ErrServiceNotInitialized is returned when a CLI command is invoked before
 // the backing service has been wired up.
 var ErrServiceNotInitialized = errors.New("service not initialized")
