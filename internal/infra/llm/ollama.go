@@ -127,7 +127,7 @@ func (c *OllamaClient) Generate(ctx context.Context, prompt string) (string, err
 		Stream: false,
 	})
 	if err != nil {
-		return "", fmt.Errorf("ollama: marshal request: %w", err)
+		return "", fmt.Errorf("ollama: %w: %w", domain.ErrLLMMarshalRequestFailed, err)
 	}
 
 	c.log.Debug("sending generate request",

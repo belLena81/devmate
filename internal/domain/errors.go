@@ -55,6 +55,7 @@ var ErrEmptyRef = errors.New("ref name must not be empty")
 var ErrLLMNoAttemptsSucceed = errors.New("LLM generate: all attempts failed")
 var ErrLLMNoConfigured = errors.New("service: llm is not configured (nil)")
 var ErrLLMRequestFailed = errors.New("LLM request failed")
+var ErrLLMMarshalRequestFailed = errors.New("LLM marshal request failed")
 var ErrLLMBuildRequestFailed = errors.New("LLM build request failed")
 var ErrLLMDecodeResponseFailed = errors.New("LLM decode response failed")
 

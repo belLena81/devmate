@@ -28,9 +28,11 @@ func main() {
 	}))
 
 	ollamaClient := llm.NewOllamaClientFromConfig(llm.ClientConfig{
-		BaseURL:        cfg.Ollama.BaseURL,
-		Model:          cfg.Ollama.Model,
-		RequestTimeout: cfg.Ollama.RequestTimeout(),
+		BaseURL:          cfg.Ollama.BaseURL,
+		GeneratePath:     cfg.Ollama.GeneratePath,
+		Model:            cfg.Ollama.Model,
+		RequestTimeout:   cfg.Ollama.RequestTimeout(),
+		MaxResponseBytes: cfg.Ollama.MaxResponseBytes,
 	}, llm.WithLogger(log))
 
 	cache := buildCache(cfg.Cache.Dir, log)
