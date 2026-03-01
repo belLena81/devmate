@@ -44,50 +44,6 @@ func ChunkDiff(diff string, maxSize int) []string {
 	return chunks
 }
 
-// ChunkDiffWithMeta is like ChunkDiff but returns Chunk values that also carry
-// the file names covered by each chunk. Used by mapReduce for structured logs.
-func ChunkDiffWithMeta(diff string, maxSize int) []Chunk {
-	fileDiffs := splitOnFileBoundary(diff)
-
-	var chunks []Chunk
-	var currentContent strings.Builder
-	var currentFiles []string
-
-	flush := func() {
-		if currentContent.Len() > 0 {
-			chunks = append(chunks, Chunk{
-				Content: currentContent.String(),
-				Files:   currentFiles,
-			})
-			currentContent.Reset()
-			currentFiles = nil
-		}
-	}
-
-	for _, fileDiff := range fileDiffs {
-		fileName := extractFileName(fileDiff)
-
-		if len(fileDiff) > maxSize {
-			flush()
-			for i, part := range hardSplit(fileDiff, maxSize) {
-				chunks = append(chunks, Chunk{
-					Content: part,
-					Files:   []string{fmt.Sprintf("%s (part %d)", fileName, i+1)},
-				})
-			}
-			continue
-		}
-		if currentContent.Len()+len(fileDiff) > maxSize {
-			flush()
-		}
-		currentContent.WriteString(fileDiff)
-		currentFiles = append(currentFiles, fileName)
-	}
-
-	flush()
-	return chunks
-}
-
 // splitOnFileBoundary splits a unified diff into per-file sections. Each
 // section starts with its own "diff --git …" header line.
 func splitOnFileBoundary(diff string) []string {
