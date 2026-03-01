@@ -405,8 +405,8 @@ func TestNew_Defaults(t *testing.T) {
 	if svc.MaxRetries() != 0 {
 		t.Errorf("MaxRetries: got %d, want 0", svc.MaxRetries())
 	}
-	if svc.RetryBaseDelay() != defaultRetryBaseDelay {
-		t.Errorf("RetryBaseDelay: got %v, want %v (uses package default)", svc.RetryBaseDelay(), defaultRetryBaseDelay)
+	if svc.RetryBaseDelay() != config.DefaultRetryBaseDelay {
+		t.Errorf("RetryBaseDelay: got %v, want %v (uses package default)", svc.RetryBaseDelay(), config.DefaultRetryBaseDelay)
 	}
 	if _, ok := svc.Progress().(domain.NoopProgress); !ok {
 		t.Error("Progress: expected NoopProgress by default")

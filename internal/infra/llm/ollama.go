@@ -3,6 +3,7 @@ package llm
 import (
 	"bytes"
 	"context"
+	"devmate/internal/domain"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,31 +13,20 @@ import (
 	"time"
 )
 
-const generatePath = "/api/generate"
-
-// maxResponseBytes is the upper bound on how many bytes we read from a single
-// Ollama /api/generate response body. 10 MiB covers any realistic LLM output
-// while preventing a misbehaving or malicious server from exhausting memory.
-const maxResponseBytes = 10 << 20 // 10 MiB
-
 // OllamaClient calls a local Ollama server to generate text.
 // It implements domain.LLM.
 type OllamaClient struct {
-	baseURL        string
-	model          string
-	http           *http.Client
-	log            *slog.Logger
-	requestTimeout time.Duration
+	baseURL          string
+	generatePath     string
+	model            string
+	http             *http.Client
+	log              *slog.Logger
+	requestTimeout   time.Duration
+	maxResponseBytes int64
 }
 
 // Option configures an OllamaClient.
 type Option func(*OllamaClient)
-
-// WithBaseURL overrides the default Ollama server URL (http://localhost:11434).
-// Useful for pointing at a remote instance or in tests.
-func WithBaseURL(url string) Option {
-	return func(c *OllamaClient) { c.baseURL = url }
-}
 
 // WithModel overrides the default model name.
 func WithModel(model string) Option {
@@ -52,17 +42,21 @@ func WithLogger(log *slog.Logger) Option {
 func WithRequestTimeout(d time.Duration) Option {
 	return func(c *OllamaClient) { c.requestTimeout = d }
 }
+func WithMaxResponseBytes(n int64) Option {
+	return func(c *OllamaClient) { c.maxResponseBytes = n }
+}
 
 // NewOllamaClient returns a ready-to-use OllamaClient.
 // Call with no arguments for sensible defaults; use Option functions to override.
 // In production, prefer NewOllamaClientFromConfig to wire all settings from Config.
-func NewOllamaClient(opts ...Option) *OllamaClient {
+func NewOllamaClient(url, path string, timeout time.Duration, maxResponse int64, opts ...Option) *OllamaClient {
 	c := &OllamaClient{
-		baseURL:        "http://localhost:11434",
-		model:          "llama3.2:3b",
-		http:           &http.Client{}, // no client-level timeout; each Generate call sets its own
-		log:            slog.Default().With("component", "ollama"),
-		requestTimeout: 3 * time.Minute,
+		baseURL:          url,
+		generatePath:     path,
+		http:             &http.Client{}, // no client-level timeout; each Generate call sets its own
+		log:              slog.Default().With("component", "ollama"),
+		requestTimeout:   timeout,
+		maxResponseBytes: maxResponse,
 	}
 	for _, o := range opts {
 		o(c)
@@ -73,23 +67,26 @@ func NewOllamaClient(opts ...Option) *OllamaClient {
 // ClientConfig holds the configuration values NewOllamaClientFromConfig uses.
 // Populate it from your application's config package.
 type ClientConfig struct {
-	BaseURL        string
-	Model          string
-	RequestTimeout time.Duration
+	BaseURL          string
+	GeneratePath     string
+	Model            string
+	RequestTimeout   time.Duration
+	MaxResponseBytes int64
 }
 
 // NewOllamaClientFromConfig returns an OllamaClient fully configured from cfg.
 // Additional opts are applied after the config values, so they can still override.
 func NewOllamaClientFromConfig(cfg ClientConfig, opts ...Option) *OllamaClient {
-	return NewOllamaClient(append([]Option{
-		WithBaseURL(cfg.BaseURL),
+	return NewOllamaClient(cfg.BaseURL, cfg.GeneratePath, cfg.RequestTimeout, cfg.MaxResponseBytes, append([]Option{
 		WithModel(cfg.Model),
-		WithRequestTimeout(cfg.RequestTimeout),
 	}, opts...)...)
 }
 
 // BaseURL returns the server base URL this client is configured to use.
 func (c *OllamaClient) BaseURL() string { return c.baseURL }
+
+// GeneratePath returns the server generate path this client is configured to use.
+func (c *OllamaClient) GeneratePath() string { return c.generatePath }
 
 // Model returns the model name this client is configured to use.
 func (c *OllamaClient) Model() string { return c.model }
@@ -149,9 +146,9 @@ func (c *OllamaClient) doGenerate(ctx context.Context, body []byte) (string, err
 	ctx, cancel := context.WithTimeout(ctx, c.requestTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+generatePath, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+c.generatePath, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("ollama: build request: %w", err)
+		return "", fmt.Errorf("ollama: %w: %w", domain.ErrLLMBuildRequestFailed, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -161,7 +158,7 @@ func (c *OllamaClient) doGenerate(ctx context.Context, body []byte) (string, err
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		return "", fmt.Errorf("ollama: request failed: %w", err)
+		return "", fmt.Errorf("ollama: %w: %w", domain.ErrLLMRequestFailed, err)
 	}
 	defer resp.Body.Close()
 
@@ -170,8 +167,8 @@ func (c *OllamaClient) doGenerate(ctx context.Context, body []byte) (string, err
 	}
 
 	var result generateResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes)).Decode(&result); err != nil {
-		return "", fmt.Errorf("ollama: decode response: %w", err)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, c.maxResponseBytes)).Decode(&result); err != nil {
+		return "", fmt.Errorf("ollama: %w: %w", domain.ErrLLMDecodeResponseFailed, err)
 	}
 
 	text := strings.TrimSpace(result.Response)

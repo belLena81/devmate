@@ -2,7 +2,7 @@
 //
 // Settings are resolved in priority order (highest to lowest):
 //
-//  1. Environment variables  (DEVMATE_*)
+//  1. Environment variables (DEVMATE_*)
 //  2. Config file            (./config/config.json, or $DEVMATE_CONFIG)
 //  3. Built-in defaults
 //
@@ -16,26 +16,25 @@
 //
 // Example config file:
 //
-//	{
-//	  "ollama": {
-//	    "base_url": "http://localhost:11434",
-//	    "model":    "llama3.2:3b",
-//	    "request_timeout_sec": 180,
-//	    "http_max_retries": 3,
-//	    "retry_base_delay_sec": 2
-//	  },
-//	  "service": {
-//	    "chunk_threshold": 3000,
-//	    "max_concurrency": 2,
-//	    "max_retries": 0
-//	  },
-//	  "cache": {
-//	    "dir": ""
-//	  },
-//	  "log": {
-//	    "level": "info"
-//	  }
-//	}
+//		{
+//		  "ollama": {
+//		    "base_url": "http://localhost:11434",
+//		    "model":    "llama3.2:3b",
+//		    "request_timeout_sec": 180,
+//		  },
+//		  "service": {
+//		    "chunk_threshold": 3000,
+//		    "max_concurrency": 2,
+//		    "max_retries": 0,
+//	     "retry_base_delay_sec": 1,
+//		  },
+//		  "cache": {
+//		    "dir": ""
+//		  },
+//		  "log": {
+//		    "level": "info"
+//		  }
+//		}
 package config
 
 import (
@@ -54,13 +53,16 @@ import (
 // provided. They live here as the single authoritative reference that both
 // the config file documentation and the defaults() function use.
 const (
-	DefaultOllamaBaseURL         = "http://localhost:11434"
-	DefaultOllamaModel           = "llama3.2:3b"
-	DefaultOllamaRequestTimeout  = 3 * time.Minute
-	DefaultServiceChunkThreshold = 3000
-	DefaultServiceMaxConcurrency = 2
-	DefaultServiceMaxRetries     = 0
-	DefaultLogLevel              = "info"
+	DefaultOllamaBaseURL          = "http://localhost:11434"
+	DefaultGeneratePath           = "/api/generate"
+	DefaultOllamaModel            = "llama3.2:3b"
+	DefaultOllamaRequestTimeout   = 3 * time.Minute
+	DefaultOllamaMaxResponseBytes = 10 << 20 // 10 MiB
+	DefaultServiceChunkThreshold  = 3000
+	DefaultServiceMaxConcurrency  = 2
+	DefaultServiceMaxRetries      = 0
+	DefaultLogLevel               = "info"
+	DefaultRetryBaseDelay         = 1 * time.Second
 )
 
 // ─── Config struct ────────────────────────────────────────────────────────────
@@ -80,22 +82,20 @@ type OllamaConfig struct {
 	// BaseURL is the URL of the Ollama server.
 	// Env: DEVMATE_OLLAMA_BASE_URL
 	BaseURL string `json:"base_url"`
+	// GeneratePath is the path part of the Ollama request URL.
+	// Env: DEVMATE_OLLAMA_GENERATE_PATH
+	GeneratePath string `json:"generate_path"`
 
 	// Model is the Ollama model tag to use (e.g. "llama3.2:3b").
 	// Env: DEVMATE_OLLAMA_MODEL
 	Model string `json:"model"`
 
 	// RequestTimeoutSec is the per-request timeout in seconds.
-	// Env: DEVMATE_OLLAMA_REQUEST_TIMEOUT_SEC
+	// Env: DEVMATE_REQUEST_TIMEOUT_SEC
 	RequestTimeoutSec int `json:"request_timeout_sec"`
-
-	// HTTPMaxRetries is the number of HTTP-level retries on transient errors.
-	// Env: DEVMATE_OLLAMA_HTTP_MAX_RETRIES
-	HTTPMaxRetries int `json:"http_max_retries"`
-
-	// RetryBaseDelaySec is the initial back-off delay between retries in seconds.
-	// Env: DEVMATE_OLLAMA_RETRY_BASE_DELAY_SEC
-	RetryBaseDelaySec int `json:"retry_base_delay_sec"`
+	//MaxResponseBytes is the maximum number of bytes to return from the server.
+	// Env: DEVMATE_MAX_RESPONSE_BYTES
+	MaxResponseBytes int64 `json:"max_response_bytes"`
 }
 
 // RequestTimeout converts RequestTimeoutSec to a time.Duration.
@@ -106,20 +106,20 @@ func (o OllamaConfig) RequestTimeout() time.Duration {
 // ServiceConfig holds settings for the service layer.
 type ServiceConfig struct {
 	// ChunkThreshold is the diff size in bytes above which map-reduce is used.
-	// Env: DEVMATE_SERVICE_CHUNK_THRESHOLD
+	// Env: DEVMATE_CHUNK_THRESHOLD
 	ChunkThreshold int `json:"chunk_threshold"`
 
 	// MaxConcurrency is the maximum number of parallel LLM calls.
 	// 0 means use runtime.NumCPU().
-	// Env: DEVMATE_SERVICE_MAX_CONCURRENCY
+	// Env: DEVMATE_MAX_CONCURRENCY
 	MaxConcurrency int `json:"max_concurrency"`
 
 	// MaxRetries is the number of service-level retries for failed LLM calls.
-	// Env: DEVMATE_SERVICE_MAX_RETRIES
+	// Env: DEVMATE_MAX_RETRIES
 	MaxRetries int `json:"max_retries"`
 
 	// RetryBaseDelaySec is the initial exponential back-off delay in seconds.
-	// Env: DEVMATE_SERVICE_RETRY_BASE_DELAY_SEC
+	// Env: DEVMATE_RETRY_BASE_DELAY_SEC
 	RetryBaseDelaySec int `json:"retry_base_delay_sec"`
 }
 
@@ -164,14 +164,16 @@ func defaults() Config {
 	return Config{
 		Ollama: OllamaConfig{
 			BaseURL:           DefaultOllamaBaseURL,
+			GeneratePath:      DefaultGeneratePath,
 			Model:             DefaultOllamaModel,
 			RequestTimeoutSec: int(DefaultOllamaRequestTimeout.Seconds()),
+			MaxResponseBytes:  DefaultOllamaMaxResponseBytes,
 		},
 		Service: ServiceConfig{
 			ChunkThreshold:    DefaultServiceChunkThreshold,
 			MaxConcurrency:    DefaultServiceMaxConcurrency,
 			MaxRetries:        DefaultServiceMaxRetries,
-			RetryBaseDelaySec: int((2 * time.Second).Seconds()),
+			RetryBaseDelaySec: int(DefaultRetryBaseDelay.Seconds()),
 		},
 		Cache: CacheConfig{
 			Dir: defaultCacheDir(),
@@ -221,11 +223,14 @@ func Load() (Config, error) {
 
 	log.Debug("config resolved",
 		"ollama.base_url", cfg.Ollama.BaseURL,
+		"ollama.generate_path", cfg.Ollama.GeneratePath,
 		"ollama.model", cfg.Ollama.Model,
 		"ollama.request_timeout_sec", cfg.Ollama.RequestTimeoutSec,
+		"ollama.max_response_bytes", cfg.Ollama.MaxResponseBytes,
 		"service.chunk_threshold", cfg.Service.ChunkThreshold,
 		"service.max_concurrency", cfg.Service.MaxConcurrency,
 		"service.max_retries", cfg.Service.MaxRetries,
+		"service.retry_base_delay_sec", cfg.Service.RetryBaseDelaySec,
 		"cache.dir", cfg.Cache.Dir,
 		"log.level", cfg.Log.Level,
 	)
@@ -252,22 +257,13 @@ func bootstrapLogger() *slog.Logger {
 	})).With("component", "config")
 }
 
-// MustLoad is like Load but panics on error. Suitable for use in main().
-func MustLoad() Config {
-	cfg, err := Load()
-	if err != nil {
-		panic(err)
-	}
-	return cfg
-}
-
 // ─── File loading ─────────────────────────────────────────────────────────────
 
 // configFilePath returns the path to the config file to load.
 //
 // Resolution order:
 //  1. DEVMATE_CONFIG env var (absolute or relative path)
-//  2. ./config/config.json  (relative to the current working directory,
+//  2. ./config/config.json (relative to the current working directory,
 //     i.e. the project root when running "devmate" from the repo)
 //
 // Using a repo-relative path as the default makes it easy to commit a shared
@@ -312,11 +308,17 @@ func logFileOverrides(log *slog.Logger, before, after Config) {
 	if before.Ollama.BaseURL != after.Ollama.BaseURL {
 		log.Debug("file override", "key", "ollama.base_url", "value", after.Ollama.BaseURL)
 	}
+	if before.Ollama.GeneratePath != after.Ollama.GeneratePath {
+		log.Debug("file override", "key", "ollama.generate_path", "value", after.Ollama.GeneratePath)
+	}
 	if before.Ollama.Model != after.Ollama.Model {
 		log.Debug("file override", "key", "ollama.model", "value", after.Ollama.Model)
 	}
 	if before.Ollama.RequestTimeoutSec != after.Ollama.RequestTimeoutSec {
 		log.Debug("file override", "key", "ollama.request_timeout_sec", "value", after.Ollama.RequestTimeoutSec)
+	}
+	if before.Ollama.MaxResponseBytes != after.Ollama.MaxResponseBytes {
+		log.Debug("file override", "key", "ollama.max_response_bytes", "value", after.Ollama.MaxResponseBytes)
 	}
 	if before.Service.ChunkThreshold != after.Service.ChunkThreshold {
 		log.Debug("file override", "key", "service.chunk_threshold", "value", after.Service.ChunkThreshold)
@@ -326,6 +328,9 @@ func logFileOverrides(log *slog.Logger, before, after Config) {
 	}
 	if before.Service.MaxRetries != after.Service.MaxRetries {
 		log.Debug("file override", "key", "service.max_retries", "value", after.Service.MaxRetries)
+	}
+	if before.Service.RetryBaseDelaySec != after.Service.RetryBaseDelaySec {
+		log.Debug("file override", "key", "service.retry_base_delay_sec", "value", after.Service.RetryBaseDelaySec)
 	}
 	if before.Cache.Dir != after.Cache.Dir {
 		log.Debug("file override", "key", "cache.dir", "value", after.Cache.Dir)
@@ -354,53 +359,50 @@ func applyEnv(cfg *Config, log *slog.Logger) (int, error) {
 	if v := os.Getenv("DEVMATE_OLLAMA_BASE_URL"); v != "" {
 		override("ollama.base_url", v, func() { cfg.Ollama.BaseURL = v })
 	}
+	if v := os.Getenv("DEVMATE_OLLAMA_GENERATE_PATH"); v != "" {
+		override("ollama.generate_path", v, func() { cfg.Ollama.GeneratePath = v })
+	}
 	if v := os.Getenv("DEVMATE_OLLAMA_MODEL"); v != "" {
 		override("ollama.model", v, func() { cfg.Ollama.Model = v })
 	}
-	if v := os.Getenv("DEVMATE_OLLAMA_REQUEST_TIMEOUT_SEC"); v != "" {
-		n, err := parseIntEnv(v, "DEVMATE_OLLAMA_REQUEST_TIMEOUT_SEC")
+	if v := os.Getenv("DEVMATE_REQUEST_TIMEOUT_SEC"); v != "" {
+		n, err := parseIntEnv(v, "DEVMATE_REQUEST_TIMEOUT_SEC")
 		if err != nil {
 			return count, err
 		}
 		override("ollama.request_timeout_sec", v, func() { cfg.Ollama.RequestTimeoutSec = n })
 	}
-	if v := os.Getenv("DEVMATE_OLLAMA_HTTP_MAX_RETRIES"); v != "" {
-		n, err := parseIntEnv(v, "DEVMATE_OLLAMA_HTTP_MAX_RETRIES")
+	if v := os.Getenv("DEVMATE_MAX_RESPONSE_BYTES"); v != "" {
+		n, err := parseInt64Env(v, "DEVMATE_MAX_RESPONSE_BYTES")
 		if err != nil {
 			return count, err
 		}
-		override("ollama.http_max_retries", v, func() { cfg.Ollama.HTTPMaxRetries = n })
+		override("ollama.max_response_bytes", v, func() { cfg.Ollama.MaxResponseBytes = n })
 	}
-	if v := os.Getenv("DEVMATE_OLLAMA_RETRY_BASE_DELAY_SEC"); v != "" {
-		n, err := parseIntEnv(v, "DEVMATE_OLLAMA_RETRY_BASE_DELAY_SEC")
-		if err != nil {
-			return count, err
-		}
-		override("ollama.retry_base_delay_sec", v, func() { cfg.Ollama.RetryBaseDelaySec = n })
-	}
-	if v := os.Getenv("DEVMATE_SERVICE_CHUNK_THRESHOLD"); v != "" {
-		n, err := parseIntEnv(v, "DEVMATE_SERVICE_CHUNK_THRESHOLD")
+
+	if v := os.Getenv("DEVMATE_CHUNK_THRESHOLD"); v != "" {
+		n, err := parseIntEnv(v, "DEVMATE_CHUNK_THRESHOLD")
 		if err != nil {
 			return count, err
 		}
 		override("service.chunk_threshold", v, func() { cfg.Service.ChunkThreshold = n })
 	}
-	if v := os.Getenv("DEVMATE_SERVICE_MAX_CONCURRENCY"); v != "" {
-		n, err := parseIntEnv(v, "DEVMATE_SERVICE_MAX_CONCURRENCY")
+	if v := os.Getenv("DEVMATE_MAX_CONCURRENCY"); v != "" {
+		n, err := parseIntEnv(v, "DEVMATE_MAX_CONCURRENCY")
 		if err != nil {
 			return count, err
 		}
 		override("service.max_concurrency", v, func() { cfg.Service.MaxConcurrency = n })
 	}
-	if v := os.Getenv("DEVMATE_SERVICE_MAX_RETRIES"); v != "" {
-		n, err := parseIntEnv(v, "DEVMATE_SERVICE_MAX_RETRIES")
+	if v := os.Getenv("DEVMATE_MAX_RETRIES"); v != "" {
+		n, err := parseIntEnv(v, "DEVMATE_MAX_RETRIES")
 		if err != nil {
 			return count, err
 		}
 		override("service.max_retries", v, func() { cfg.Service.MaxRetries = n })
 	}
-	if v := os.Getenv("DEVMATE_SERVICE_RETRY_BASE_DELAY_SEC"); v != "" {
-		n, err := parseIntEnv(v, "DEVMATE_SERVICE_RETRY_BASE_DELAY_SEC")
+	if v := os.Getenv("DEVMATE_RETRY_BASE_DELAY_SEC"); v != "" {
+		n, err := parseIntEnv(v, "DEVMATE_RETRY_BASE_DELAY_SEC")
 		if err != nil {
 			return count, err
 		}
@@ -420,6 +422,17 @@ func applyEnv(cfg *Config, log *slog.Logger) (int, error) {
 // message instead of crashing the process with a raw panic trace.
 func parseIntEnv(s, name string) (int, error) {
 	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("config: %s=%q is not a valid integer: %w", name, s, err)
+	}
+	return n, nil
+}
+
+// parseIntEnv parses s as an integer for the named environment variable.
+// It returns a descriptive error on failure so Load() can surface a clear
+// message instead of crashing the process with a raw panic trace.
+func parseInt64Env(s, name string) (int64, error) {
+	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("config: %s=%q is not a valid integer: %w", name, s, err)
 	}

@@ -109,8 +109,6 @@ type Service struct {
 	retryBaseDelay time.Duration // initial back-off between retries; 0 uses defaultRetryBaseDelay
 }
 
-const defaultRetryBaseDelay = 2 * time.Second
-
 // Settings is a functional settings for configuring a Service at
 // construction time. Using settings instead of post-construction field mutation
 // keeps the Service immutable after New() returns and makes the call site in
@@ -228,7 +226,7 @@ func (s *Service) RetryBaseDelay() time.Duration {
 	if s.retryBaseDelay > 0 {
 		return s.retryBaseDelay
 	}
-	return defaultRetryBaseDelay
+	return config.DefaultRetryBaseDelay
 }
 
 func (s *Service) Git() domain.GitClient {
@@ -246,7 +244,7 @@ func (s *Service) Git() domain.GitClient {
 // short-circuits immediately without further retries.
 func (s *Service) GenerateWithRetry(ctx context.Context, prompt string) (string, error) {
 	if s.llm == nil {
-		return "", fmt.Errorf("service: llm is not configured (nil)")
+		return "", domain.ErrLLMNoConfigured
 	}
 	attempts := s.maxRetries + 1
 	delay := s.RetryBaseDelay()
@@ -280,13 +278,8 @@ func (s *Service) GenerateWithRetry(ctx context.Context, prompt string) (string,
 		}
 
 		s.Log().Debug("llm generate failed", "attempt", i+1, "of", attempts, "error", err)
-		if i == attempts-1 {
-			return "", fmt.Errorf("llm generate failed after %d attempt(s): %w", attempts, err)
-		}
 	}
-
-	// Unreachable, but satisfies the compiler.
-	return "", domain.ErrLLMNoAttempts
+	return "", domain.ErrLLMNoAttemptsSucceed
 }
 
 type CommitOptions struct {

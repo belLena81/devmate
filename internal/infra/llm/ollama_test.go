@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"devmate/internal/infra/llm"
 )
@@ -14,8 +15,7 @@ import (
 // newTestClient creates an OllamaClient pointed at the given test server URL.
 // Model is fixed to "test-model" for all unit tests.
 func newTestClient(serverURL string) *llm.OllamaClient {
-	return llm.NewOllamaClient(
-		llm.WithBaseURL(serverURL),
+	return llm.NewOllamaClient(serverURL, "/api/generate", 5*time.Second, 10<<20,
 		llm.WithModel("test-model"),
 	)
 }
@@ -33,28 +33,34 @@ func ollamaResponse(response string) string {
 // ─── Construction ────────────────────────────────────────────────────────────
 
 func TestNewOllamaClient_DefaultURL(t *testing.T) {
-	c := llm.NewOllamaClient()
+	c := llm.NewOllamaClient("url", "/some/path", 5*time.Second, 10<<20)
+	if c.BaseURL() != "url" {
+		t.Errorf("expected base URL %q, got %q", "url", c.BaseURL())
+	}
 	if c == nil {
 		t.Fatal("NewOllamaClient returned nil")
 	}
 }
 
-func TestNewOllamaClient_DefaultModel_IsSet(t *testing.T) {
-	c := llm.NewOllamaClient()
-	if c.Model() == "" {
-		t.Error("expected a non-empty default model")
+func TestNewOllamaClient_DefaultModel_IsEmpty(t *testing.T) {
+	c := llm.NewOllamaClient("url", "/some/path", 5*time.Second, 10<<20)
+	if c.Model() != "" {
+		t.Error("expected a empty default model")
+	}
+	if c.Model() != "" {
+		t.Error("expected a empty default model")
 	}
 }
 
 func TestNewOllamaClient_WithModel_OverridesDefault(t *testing.T) {
-	c := llm.NewOllamaClient(llm.WithModel("llama3.2"))
+	c := llm.NewOllamaClient("url", "", 0, 0, llm.WithModel("llama3.2"))
 	if c.Model() != "llama3.2" {
 		t.Errorf("expected model %q, got %q", "llama3.2", c.Model())
 	}
 }
 
 func TestNewOllamaClient_WithBaseURL_OverridesDefault(t *testing.T) {
-	c := llm.NewOllamaClient(llm.WithBaseURL("http://remotehost:11434"))
+	c := llm.NewOllamaClient("http://remotehost:11434", "/some/path", 0, 0)
 	if c.BaseURL() != "http://remotehost:11434" {
 		t.Errorf("expected base URL %q, got %q", "http://remotehost:11434", c.BaseURL())
 	}
@@ -183,7 +189,7 @@ func TestGenerate_SetsJSONContentType(t *testing.T) {
 // ─── Error handling ──────────────────────────────────────────────────────────
 
 func TestGenerate_ServerUnavailable_ReturnsError(t *testing.T) {
-	c := llm.NewOllamaClient(llm.WithBaseURL("http://127.0.0.1:1")) // nothing listening
+	c := llm.NewOllamaClient("http://127.0.0.1:1", "", 0, 0) // nothing listening
 	_, err := c.Generate(context.Background(), "prompt")
 	if err == nil {
 		t.Fatal("expected error when server is unavailable")

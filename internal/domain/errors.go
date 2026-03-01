@@ -1,6 +1,8 @@
 package domain
 
-import "errors"
+import (
+	"errors"
+)
 
 // ─── Validation errors ────────────────────────────────────────────────────────
 
@@ -48,9 +50,13 @@ var ErrEmptyRef = errors.New("ref name must not be empty")
 
 // ─── Service errors ───────────────────────────────────────────────────────────
 
-// ErrLLMNoAttempts is returned when generateWithRetry is configured with a
+// ErrLLMNoAttemptsSucceed is returned when generateWithRetry is configured with a
 // non-positive attempt count — this indicates a programmer error.
-var ErrLLMNoAttempts = errors.New("LLM generate: no attempts made")
+var ErrLLMNoAttemptsSucceed = errors.New("LLM generate: all attempts failed")
+var ErrLLMNoConfigured = errors.New("service: llm is not configured (nil)")
+var ErrLLMRequestFailed = errors.New("LLM request failed")
+var ErrLLMBuildRequestFailed = errors.New("LLM build request failed")
+var ErrLLMDecodeResponseFailed = errors.New("LLM decode response failed")
 
 // ErrChunkFailed is the sentinel wrapped by errors produced when an individual
 // map-reduce chunk fails. Use errors.Is to detect this class of error.
