@@ -4,21 +4,18 @@ import (
 	"context"
 	"devmate/internal/config"
 	"devmate/internal/domain"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"runtime"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
-)
 
-type parallelResult[T any] struct {
-	idx int
-	val T
-	err error
-}
+	"github.com/cenkalti/backoff/v4"
+	"golang.org/x/sync/errgroup"
+)
 
 // parallelDo runs fn on each task with at most maxWorkers goroutines and
 // returns results in input order. The first error cancels the remaining tasks.
@@ -28,59 +25,29 @@ func parallelDo[In, Out any](
 	tasks []In,
 	fn func(ctx context.Context, idx int, in In) (Out, error),
 ) ([]Out, error) {
-	n := len(tasks)
-	if n == 0 {
+	if len(tasks) == 0 {
 		return nil, nil
 	}
 
-	workers := min(n, maxWorkers)
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(max(maxWorkers, 1))
 
-	work := make(chan int, n)
-	for i := range tasks {
-		work <- i
-	}
-	close(work)
-
-	results := make(chan parallelResult[Out], n)
-
-	cancelCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	var wg sync.WaitGroup
-	wg.Add(workers)
-	for range workers {
-		go func() {
-			defer wg.Done()
-			for idx := range work {
-				if cancelCtx.Err() != nil {
-					return
-				}
-				out, err := fn(cancelCtx, idx, tasks[idx])
-				results <- parallelResult[Out]{idx: idx, val: out, err: err}
-				if err != nil {
-					cancel()
-					return
-				}
+	out := make([]Out, len(tasks))
+	for i, task := range tasks {
+		g.Go(func() error {
+			if err := ctx.Err(); err != nil {
+				return err
 			}
-		}()
+			res, err := fn(ctx, i, task)
+			if err != nil {
+				return err
+			}
+			out[i] = res
+			return nil
+		})
 	}
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	out := make([]Out, n)
-	for r := range results {
-		if r.err != nil {
-			// Drain so in-flight workers can send and exit.
-			go func() {
-				for range results {
-				}
-			}()
-			return nil, r.err
-		}
-		out[r.idx] = r.val
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -210,45 +177,61 @@ func (s *Service) Git() domain.GitClient {
 
 // GenerateWithRetry calls the LLM with exponential back-off, making at most
 // MaxRetries+1 attempts. On exhaustion the returned error wraps both
-// domain.ErrLLMNoAttemptsSucceed and the last underlying error.
+// domain.ErrLLMNoAttemptsSucceed and the last underlying error; non-retryable
+// errors are returned immediately as-is.
 func (s *Service) GenerateWithRetry(ctx context.Context, prompt string) (string, error) {
 	if s.llm == nil {
 		return "", domain.ErrLLMNoConfigured
 	}
-	attempts := s.maxRetries + 1
-	delay := s.RetryBaseDelay()
-
-	var lastErr error
-	for i := 0; i < attempts; i++ {
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-		if i > 0 {
-			s.Log().Debug("retrying llm generate",
-				"attempt", i+1,
-				"of", attempts,
-				"after", delay,
-			)
-			select {
-			case <-time.After(delay):
-			case <-ctx.Done():
-				return "", ctx.Err()
-			}
-			delay *= 2
-		}
-
-		result, err := s.llm.Generate(ctx, prompt)
-		if err == nil {
-			return result, nil
-		}
-		if ctx.Err() != nil {
-			return "", err
-		}
-
-		lastErr = err
-		s.Log().Debug("llm generate failed", "attempt", i+1, "of", attempts, "error", err)
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
-	return "", fmt.Errorf("%w: %w", domain.ErrLLMNoAttemptsSucceed, lastErr)
+
+	attempts := s.maxRetries + 1
+	policy := backoff.NewExponentialBackOff(
+		backoff.WithInitialInterval(s.RetryBaseDelay()),
+		backoff.WithMultiplier(2),
+		backoff.WithRandomizationFactor(0),
+		backoff.WithMaxElapsedTime(0),
+	)
+	attempt := 0
+
+	result, err := backoff.RetryNotifyWithData(
+		func() (string, error) {
+			attempt++
+			res, err := s.llm.Generate(ctx, prompt)
+			if err == nil {
+				return res, nil
+			}
+			if ctx.Err() != nil || !retryable(err) {
+				return "", backoff.Permanent(err)
+			}
+			s.Log().Debug("llm generate failed", "attempt", attempt, "of", attempts, "error", err)
+			return "", err
+		},
+		backoff.WithContext(backoff.WithMaxRetries(policy, uint64(s.maxRetries)), ctx),
+		func(_ error, next time.Duration) {
+			s.Log().Debug("retrying llm generate", "attempt", attempt+1, "of", attempts, "after", next)
+		},
+	)
+	if err == nil {
+		return result, nil
+	}
+	if ctx.Err() != nil || !retryable(err) {
+		return "", err
+	}
+	return "", fmt.Errorf("%w: %w", domain.ErrLLMNoAttemptsSucceed, err)
+}
+
+// retryable reports whether err is worth another attempt: network failures and
+// transient server statuses are; malformed requests and client-side statuses are not.
+func retryable(err error) bool {
+	var status *domain.LLMStatusError
+	if errors.As(err, &status) {
+		return status.Retryable()
+	}
+	return !errors.Is(err, domain.ErrLLMMarshalRequestFailed) &&
+		!errors.Is(err, domain.ErrLLMBuildRequestFailed)
 }
 
 type CommitOptions struct {
@@ -454,7 +437,7 @@ func (s *Service) DraftMessage(ctx context.Context, o CommitOptions) (string, er
 
 	diff, err := s.git.DiffCached()
 	if err != nil {
-		s.Log().Error("failed to get diff", "error", err)
+		s.Log().Debug("failed to get diff", "error", err)
 		return "", err
 	}
 	s.Log().Debug("got diff", "bytes", len(diff))
@@ -481,7 +464,7 @@ func (s *Service) DraftMessage(ctx context.Context, o CommitOptions) (string, er
 	}
 	if err != nil {
 		s.Progress().Done("")
-		s.Log().Error("llm generation failed", "error", err)
+		s.Log().Debug("llm generation failed", "error", err)
 		return "", err
 	}
 
@@ -513,7 +496,7 @@ func (s *Service) DraftBranchName(ctx context.Context, o BranchOptions) (string,
 	result, err := s.GenerateWithRetry(ctx, prompt)
 	if err != nil {
 		s.Progress().Done("")
-		s.Log().Error("llm generation failed", "error", err)
+		s.Log().Debug("llm generation failed", "error", err)
 		return "", err
 	}
 
@@ -534,7 +517,7 @@ func (s *Service) DraftPrDescription(ctx context.Context, o PrOptions) (string, 
 
 	commits, err := s.git.LogBetween(o.DestinationBranch, o.SourceBranch)
 	if err != nil {
-		s.Log().Error("failed to get commits", "error", err)
+		s.Log().Debug("failed to get commits", "error", err)
 		return "", err
 	}
 	s.Log().Debug("got commits", "count", len(commits))
@@ -572,7 +555,7 @@ func (s *Service) DraftPrDescription(ctx context.Context, o PrOptions) (string, 
 
 	if err != nil {
 		s.Progress().Done("")
-		s.Log().Error("llm generation failed", "error", err)
+		s.Log().Debug("llm generation failed", "error", err)
 		return "", err
 	}
 

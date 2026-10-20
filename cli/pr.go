@@ -32,96 +32,38 @@ type PrService interface {
 }
 
 func newPrCmd(a *App) *cobra.Command {
-	var rawCmdType string
-	var explain, rawShort, rawDetailed, noCache bool
+	var f generateFlags
 
-	validateAndRunPr := func(cmd *cobra.Command, args []string) error {
-		prOpts, err := NewPr(args[0], args[1], rawCmdType, rawShort, rawDetailed, explain, noCache)
-		if err != nil {
-			return err
-		}
-		if a.prService == nil {
-			return domain.ErrServiceNotInitialized
-		}
-		pr, err := a.prService.DraftPrDescription(cmd.Context(), prOpts)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintln(cmd.OutOrStdout(), pr)
-		return nil
-	}
-	prCmd := &cobra.Command{
-		Use:   "pr [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] [--no-cache] source target",
-		Short: "Create a pr text from git log between heads given branch names",
-		Long: `Generates pull request title and description from the git log between two branches.
+	cmd := &cobra.Command{
+		Use:   "pr <source> <target>",
+		Short: "Draft a pull request description from the commits between two branches",
+		Long: `Generates a pull request title and description from the git log between the
+source branch (your feature branch) and the target branch (e.g. main).
 
-The command takes two required arguments — the source branch (your feature branch)
-and the target branch (e.g. main or develop) — and produces a PR title and body
-summarizing the changes between them.
-
-Devmate reads the git log in read-only mode and never opens, creates, or modifies
-pull requests or repository state.
-
-By default, Devmate auto-detects the most appropriate PR type (feat, fix,
-chore, docs, refactor) from the commit history. You may explicitly provide
-a type override using --type.
-
-Arguments:
-  source    The branch containing your changes (e.g. feature/add-auth)
-  target    The branch to merge into (e.g. main, develop)
-
-Flags:
-  -t, --type string     Override PR type (feat, fix, chore, docs, refactor)
-      --explain         Provide reasoning behind the generated PR description
-      --short           Generate a concise PR title and summary (default)
-      --detailed        Generate a detailed PR description with full change breakdown
-      --no-cache        Bypass the response cache and always call the LLM;
-                        the fresh response overwrites any existing cached entry
-
-Note:
-  --short and --detailed are mutually exclusive.
-  If neither is provided, a short format is used.
-`,
+By default the PR type (feat, fix, chore, docs, refactor) is auto-detected from
+the commit history; use --type to force one. The text is written to stdout.
+devmate never opens, creates, or modifies pull requests.`,
+		Example: `  devmate pr feat/payment-webhook-retry main
+  devmate pr feat/payment-webhook-retry main --detailed
+  devmate pr feat/payment-webhook-retry develop --type fix --no-cache`,
 		Args: cobra.ExactArgs(2),
-		RunE: validateAndRunPr,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			opts, err := NewPr(args[0], args[1], f.cmdType, f.short, f.detailed, f.explain, f.noCache)
+			if err != nil {
+				return err
+			}
+			if a.prService == nil {
+				return domain.ErrServiceNotInitialized
+			}
+			pr, err := a.prService.DraftPrDescription(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), pr)
+			return nil
+		},
 	}
 
-	prCmd.Flags().StringVarP(
-		&rawCmdType,
-		"type",
-		"t",
-		"",
-		"force pr description type (feat, fix, chore, docs, refactor)",
-	)
-
-	prCmd.Flags().BoolVar(
-		&explain,
-		"explain",
-		false,
-		"explain why this pr description was generated",
-	)
-
-	prCmd.Flags().BoolVar(
-		&rawShort,
-		"short",
-		false,
-		"generate concise bullet points only pr description (default)",
-	)
-
-	prCmd.Flags().BoolVar(
-		&rawDetailed,
-		"detailed",
-		false,
-		"generate detailed verbose pr description",
-	)
-
-	prCmd.Flags().BoolVar(
-		&noCache,
-		"no-cache",
-		false,
-		"bypass the response cache and always call the LLM",
-	)
-
-	prCmd.MarkFlagsMutuallyExclusive("short", "detailed")
-	return prCmd
+	bindGenerateFlags(cmd, &f, "PR description")
+	return cmd
 }

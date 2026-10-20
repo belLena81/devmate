@@ -21,7 +21,7 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Errorf("BaseURL: got %q, want %q", cfg.Ollama.BaseURL, config.DefaultOllamaBaseURL)
 	}
 	if cfg.Ollama.GeneratePath != config.DefaultGeneratePath {
-		t.Errorf("GeneratePath: got %q, want %q", cfg.Ollama.BaseURL, config.DefaultGeneratePath)
+		t.Errorf("GeneratePath: got %q, want %q", cfg.Ollama.GeneratePath, config.DefaultGeneratePath)
 	}
 	if cfg.Ollama.Model != config.DefaultOllamaModel {
 		t.Errorf("Model: got %q, want %q", cfg.Ollama.Model, config.DefaultOllamaModel)
@@ -30,7 +30,7 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Errorf("RequestTimeout: got %v, want %v", cfg.Ollama.RequestTimeout(), config.DefaultOllamaRequestTimeout)
 	}
 	if cfg.Ollama.MaxResponseBytes != config.DefaultOllamaMaxResponseBytes {
-		t.Errorf("MaxResponseBytes: got %q, want %q", cfg.Ollama.BaseURL, config.DefaultOllamaMaxResponseBytes)
+		t.Errorf("MaxResponseBytes: got %d, want %d", cfg.Ollama.MaxResponseBytes, config.DefaultOllamaMaxResponseBytes)
 	}
 	if cfg.Service.ChunkThreshold != config.DefaultServiceChunkThreshold {
 		t.Errorf("ChunkThreshold: got %d, want %d", cfg.Service.ChunkThreshold, config.DefaultServiceChunkThreshold)
@@ -42,7 +42,7 @@ func TestLoad_Defaults(t *testing.T) {
 		t.Errorf("MaxRetries: got %d, want %d", cfg.Service.MaxRetries, config.DefaultServiceMaxRetries)
 	}
 	if cfg.Service.RetryBaseDelay() != config.DefaultRetryBaseDelay {
-		t.Errorf("RetryBaseDelaySec: got %q, want %q", cfg.Ollama.BaseURL, config.DefaultRetryBaseDelay)
+		t.Errorf("RetryBaseDelay: got %v, want %v", cfg.Service.RetryBaseDelay(), config.DefaultRetryBaseDelay)
 	}
 
 	if cfg.Log.Level != config.DefaultLogLevel {

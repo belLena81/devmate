@@ -3,12 +3,15 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
+
+	"github.com/caarlos0/env/v11"
 )
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
@@ -24,6 +27,9 @@ const (
 	DefaultServiceMaxRetries      = 0
 	DefaultLogLevel               = "info"
 	DefaultRetryBaseDelay         = 1 * time.Second
+
+	appName        = "devmate"
+	configFileName = "config.json"
 )
 
 // ─── Config struct ────────────────────────────────────────────────────────────
@@ -38,13 +44,11 @@ type Config struct {
 
 // OllamaConfig holds settings for the Ollama LLM client.
 type OllamaConfig struct {
-	BaseURL      string `json:"base_url"`
-	GeneratePath string `json:"generate_path"`
-
-	Model string `json:"model"`
-
-	RequestTimeoutSec int   `json:"request_timeout_sec"`
-	MaxResponseBytes  int64 `json:"max_response_bytes"`
+	BaseURL           string `json:"base_url"            env:"DEVMATE_OLLAMA_BASE_URL"`
+	GeneratePath      string `json:"generate_path"       env:"DEVMATE_OLLAMA_GENERATE_PATH"`
+	Model             string `json:"model"               env:"DEVMATE_OLLAMA_MODEL"`
+	RequestTimeoutSec int    `json:"request_timeout_sec" env:"DEVMATE_REQUEST_TIMEOUT_SEC"`
+	MaxResponseBytes  int64  `json:"max_response_bytes"  env:"DEVMATE_MAX_RESPONSE_BYTES"`
 }
 
 // RequestTimeout converts RequestTimeoutSec to a time.Duration.
@@ -55,14 +59,11 @@ func (o OllamaConfig) RequestTimeout() time.Duration {
 // ServiceConfig holds settings for the service layer.
 type ServiceConfig struct {
 	// ChunkThreshold is the diff size in bytes above which map-reduce is used.
-	ChunkThreshold int `json:"chunk_threshold"`
-
+	ChunkThreshold int `json:"chunk_threshold" env:"DEVMATE_CHUNK_THRESHOLD"`
 	// MaxConcurrency is the maximum number of parallel LLM calls; 0 means runtime.NumCPU().
-	MaxConcurrency int `json:"max_concurrency"`
-
-	MaxRetries int `json:"max_retries"`
-
-	RetryBaseDelaySec int `json:"retry_base_delay_sec"`
+	MaxConcurrency    int `json:"max_concurrency"      env:"DEVMATE_MAX_CONCURRENCY"`
+	MaxRetries        int `json:"max_retries"          env:"DEVMATE_MAX_RETRIES"`
+	RetryBaseDelaySec int `json:"retry_base_delay_sec" env:"DEVMATE_RETRY_BASE_DELAY_SEC"`
 }
 
 // RetryBaseDelay converts RetryBaseDelaySec to a time.Duration.
@@ -72,12 +73,12 @@ func (s ServiceConfig) RetryBaseDelay() time.Duration {
 
 // CacheConfig holds settings for the disk cache.
 type CacheConfig struct {
-	Dir string `json:"dir"`
+	Dir string `json:"dir" env:"DEVMATE_CACHE_DIR"`
 }
 
 // LogConfig holds logging settings.
 type LogConfig struct {
-	Level string `json:"level"`
+	Level string `json:"level" env:"DEVMATE_LOG_LEVEL"`
 }
 
 // SlogLevel converts Level to a slog.Level.
@@ -94,9 +95,6 @@ func (l LogConfig) SlogLevel() slog.Level {
 	}
 }
 
-// ─── Default constructor ─────────────────────────────────────────────────────
-
-// defaults returns a Config pre-filled with all built-in defaults.
 func defaults() Config {
 	return Config{
 		Ollama: OllamaConfig{
@@ -112,41 +110,79 @@ func defaults() Config {
 			MaxRetries:        DefaultServiceMaxRetries,
 			RetryBaseDelaySec: int(DefaultRetryBaseDelay.Seconds()),
 		},
-		Cache: CacheConfig{
-			Dir: defaultCacheDir(),
-		},
-		Log: LogConfig{
-			Level: DefaultLogLevel,
-		},
+		Cache: CacheConfig{Dir: DefaultCacheDir()},
+		Log:   LogConfig{Level: DefaultLogLevel},
 	}
+}
+
+// ─── Paths ────────────────────────────────────────────────────────────────────
+
+// DefaultPath returns the per-user config file location, or "" when the user config dir is unknown.
+func DefaultPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, appName, configFileName)
+}
+
+// DefaultCacheDir returns the per-user cache directory, or "" when the user cache dir is unknown.
+func DefaultCacheDir() string {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, appName)
+}
+
+func resolvePath(explicit string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if p := os.Getenv("DEVMATE_CONFIG"); p != "" {
+		return p
+	}
+	return DefaultPath()
 }
 
 // ─── Load ────────────────────────────────────────────────────────────────────
 
-// Load builds the resolved Config by layering defaults, then the config file, then env vars.
+// Options controls how Load locates the config file and reports progress.
+type Options struct {
+	// Path overrides the config file; empty means DEVMATE_CONFIG, then DefaultPath().
+	Path string
+	// Debug prints config-loading details to stderr.
+	Debug bool
+}
+
+// Load is LoadWith using the default options.
 func Load() (Config, error) {
-	log := bootstrapLogger()
+	return LoadWith(Options{})
+}
 
+// LoadWith builds the resolved Config by layering defaults, then the config file, then env vars.
+func LoadWith(o Options) (Config, error) {
+	log := bootstrapLogger(o.Debug)
 	cfg := defaults()
-	log.Debug("config defaults applied")
 
-	path := configFilePath()
-	log.Debug("loading config file", "path", path)
-
-	fileLoaded, err := loadFile(path, &cfg, log)
+	path := resolvePath(o.Path)
+	loaded, err := loadFile(path, &cfg, log)
 	if err != nil {
 		return cfg, fmt.Errorf("config: loading %s: %w", path, err)
 	}
-	if !fileLoaded {
+	if !loaded {
 		log.Debug("config file not found, using built-in defaults", "path", path)
 	}
 
-	envCount, err := applyEnv(&cfg, log)
+	err = env.ParseWithOptions(&cfg, env.Options{
+		OnSet: func(tag string, value any, _ bool) {
+			if v, ok := os.LookupEnv(tag); ok && v != "" {
+				log.Debug("env override", "key", tag, "value", value)
+			}
+		},
+	})
 	if err != nil {
-		return cfg, err
-	}
-	if envCount > 0 {
-		log.Debug("env var overrides applied", "count", envCount)
+		return cfg, fmt.Errorf("config: %w", err)
 	}
 
 	log.Debug("config resolved",
@@ -162,183 +198,40 @@ func Load() (Config, error) {
 		"cache.dir", cfg.Cache.Dir,
 		"log.level", cfg.Log.Level,
 	)
-
 	return cfg, nil
 }
 
-// bootstrapLogger returns the stderr logger used during Load, before the configured log level is known.
-func bootstrapLogger() *slog.Logger {
-	level := slog.LevelDebug
-	if v := os.Getenv("DEVMATE_LOG_LEVEL"); v != "debug" && v != "" {
-		level = slog.LevelError + 1
+// bootstrapLogger logs config loading to stderr only when debug output was requested.
+func bootstrapLogger(debug bool) *slog.Logger {
+	level := slog.LevelError + 1
+	if debug || os.Getenv("DEVMATE_LOG_LEVEL") == "debug" {
+		level = slog.LevelDebug
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: level,
-	})).With("component", "config")
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})).
+		With("component", "config")
 }
 
-// ─── File loading ─────────────────────────────────────────────────────────────
-
-func configFilePath() string {
-	if p := os.Getenv("DEVMATE_CONFIG"); p != "" {
-		return p
-	}
-	return filepath.Join("config", "config.json")
-}
-
-// loadFile reads a JSON config file into cfg; a missing file returns (false, nil).
-func loadFile(path string, cfg *Config, log *slog.Logger) (loaded bool, err error) {
-	f, err := os.Open(path)
-	if os.IsNotExist(err) {
+// loadFile merges a JSON config file into cfg; a missing file returns (false, nil).
+func loadFile(path string, cfg *Config, log *slog.Logger) (bool, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	defer f.Close()
-
-	before := *cfg
-
-	dec := json.NewDecoder(f)
-	if err := dec.Decode(cfg); err != nil {
+	if err := json.Unmarshal(data, cfg); err != nil {
 		return false, fmt.Errorf("parse error: %w", err)
 	}
-
 	log.Debug("config file loaded", "path", path)
-	logFileOverrides(log, before, *cfg)
+
+	var sections map[string]map[string]any
+	if json.Unmarshal(data, &sections) == nil {
+		for section, keys := range sections {
+			for key, value := range keys {
+				log.Debug("file override", "key", section+"."+key, "value", value)
+			}
+		}
+	}
 	return true, nil
-}
-
-func logFileOverrides(log *slog.Logger, before, after Config) {
-	if before.Ollama.BaseURL != after.Ollama.BaseURL {
-		log.Debug("file override", "key", "ollama.base_url", "value", after.Ollama.BaseURL)
-	}
-	if before.Ollama.GeneratePath != after.Ollama.GeneratePath {
-		log.Debug("file override", "key", "ollama.generate_path", "value", after.Ollama.GeneratePath)
-	}
-	if before.Ollama.Model != after.Ollama.Model {
-		log.Debug("file override", "key", "ollama.model", "value", after.Ollama.Model)
-	}
-	if before.Ollama.RequestTimeoutSec != after.Ollama.RequestTimeoutSec {
-		log.Debug("file override", "key", "ollama.request_timeout_sec", "value", after.Ollama.RequestTimeoutSec)
-	}
-	if before.Ollama.MaxResponseBytes != after.Ollama.MaxResponseBytes {
-		log.Debug("file override", "key", "ollama.max_response_bytes", "value", after.Ollama.MaxResponseBytes)
-	}
-	if before.Service.ChunkThreshold != after.Service.ChunkThreshold {
-		log.Debug("file override", "key", "service.chunk_threshold", "value", after.Service.ChunkThreshold)
-	}
-	if before.Service.MaxConcurrency != after.Service.MaxConcurrency {
-		log.Debug("file override", "key", "service.max_concurrency", "value", after.Service.MaxConcurrency)
-	}
-	if before.Service.MaxRetries != after.Service.MaxRetries {
-		log.Debug("file override", "key", "service.max_retries", "value", after.Service.MaxRetries)
-	}
-	if before.Service.RetryBaseDelaySec != after.Service.RetryBaseDelaySec {
-		log.Debug("file override", "key", "service.retry_base_delay_sec", "value", after.Service.RetryBaseDelaySec)
-	}
-	if before.Cache.Dir != after.Cache.Dir {
-		log.Debug("file override", "key", "cache.dir", "value", after.Cache.Dir)
-	}
-	if before.Log.Level != after.Log.Level {
-		log.Debug("file override", "key", "log.level", "value", after.Log.Level)
-	}
-}
-
-// ─── Env-var overlay ──────────────────────────────────────────────────────────
-
-// applyEnv overlays non-empty DEVMATE_* env vars onto cfg and returns the number of overrides applied.
-func applyEnv(cfg *Config, log *slog.Logger) (int, error) {
-	count := 0
-	override := func(key, val string, apply func()) {
-		log.Debug("env override", "key", key, "value", val)
-		apply()
-		count++
-	}
-
-	if v := os.Getenv("DEVMATE_OLLAMA_BASE_URL"); v != "" {
-		override("ollama.base_url", v, func() { cfg.Ollama.BaseURL = v })
-	}
-	if v := os.Getenv("DEVMATE_OLLAMA_GENERATE_PATH"); v != "" {
-		override("ollama.generate_path", v, func() { cfg.Ollama.GeneratePath = v })
-	}
-	if v := os.Getenv("DEVMATE_OLLAMA_MODEL"); v != "" {
-		override("ollama.model", v, func() { cfg.Ollama.Model = v })
-	}
-	if v := os.Getenv("DEVMATE_REQUEST_TIMEOUT_SEC"); v != "" {
-		n, err := parseIntEnv(v, "DEVMATE_REQUEST_TIMEOUT_SEC")
-		if err != nil {
-			return count, err
-		}
-		override("ollama.request_timeout_sec", v, func() { cfg.Ollama.RequestTimeoutSec = n })
-	}
-	if v := os.Getenv("DEVMATE_MAX_RESPONSE_BYTES"); v != "" {
-		n, err := parseInt64Env(v, "DEVMATE_MAX_RESPONSE_BYTES")
-		if err != nil {
-			return count, err
-		}
-		override("ollama.max_response_bytes", v, func() { cfg.Ollama.MaxResponseBytes = n })
-	}
-
-	if v := os.Getenv("DEVMATE_CHUNK_THRESHOLD"); v != "" {
-		n, err := parseIntEnv(v, "DEVMATE_CHUNK_THRESHOLD")
-		if err != nil {
-			return count, err
-		}
-		override("service.chunk_threshold", v, func() { cfg.Service.ChunkThreshold = n })
-	}
-	if v := os.Getenv("DEVMATE_MAX_CONCURRENCY"); v != "" {
-		n, err := parseIntEnv(v, "DEVMATE_MAX_CONCURRENCY")
-		if err != nil {
-			return count, err
-		}
-		override("service.max_concurrency", v, func() { cfg.Service.MaxConcurrency = n })
-	}
-	if v := os.Getenv("DEVMATE_MAX_RETRIES"); v != "" {
-		n, err := parseIntEnv(v, "DEVMATE_MAX_RETRIES")
-		if err != nil {
-			return count, err
-		}
-		override("service.max_retries", v, func() { cfg.Service.MaxRetries = n })
-	}
-	if v := os.Getenv("DEVMATE_RETRY_BASE_DELAY_SEC"); v != "" {
-		n, err := parseIntEnv(v, "DEVMATE_RETRY_BASE_DELAY_SEC")
-		if err != nil {
-			return count, err
-		}
-		override("service.retry_base_delay_sec", v, func() { cfg.Service.RetryBaseDelaySec = n })
-	}
-	if v := os.Getenv("DEVMATE_CACHE_DIR"); v != "" {
-		override("cache.dir", v, func() { cfg.Cache.Dir = v })
-	}
-	if v := os.Getenv("DEVMATE_LOG_LEVEL"); v != "" {
-		override("log.level", v, func() { cfg.Log.Level = v })
-	}
-	return count, nil
-}
-
-func parseIntEnv(s, name string) (int, error) {
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return 0, fmt.Errorf("config: %s=%q is not a valid integer: %w", name, s, err)
-	}
-	return n, nil
-}
-
-func parseInt64Env(s, name string) (int64, error) {
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("config: %s=%q is not a valid integer: %w", name, s, err)
-	}
-	return n, nil
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-func defaultCacheDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".cache", "devmate")
 }

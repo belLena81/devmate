@@ -1,29 +1,54 @@
 package main
 
 import (
+	"context"
 	"devmate/cli"
 	"devmate/internal/config"
+	"devmate/internal/domain"
 	"devmate/internal/infra/git"
 	"devmate/internal/infra/llm"
 	"devmate/internal/infra/progress"
 	"devmate/internal/service"
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
+
+	"golang.org/x/term"
 )
 
 func main() {
-	cfg, err := config.Load()
-	if err != nil {
-		slog.New(slog.NewTextHandler(os.Stderr, nil)).
-			Error("failed to load config", "error", err)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	app := cli.NewLazyApp(buildService)
+	if err := app.ExecuteContext(ctx); err != nil {
+		if errors.Is(err, context.Canceled) {
+			os.Exit(130)
+		}
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
+	}
+}
+
+func buildService(flags cli.GlobalFlags) (*service.Service, error) {
+	cfg, err := config.LoadWith(config.Options{Path: flags.ConfigPath, Debug: flags.Verbose})
+	if err != nil {
+		return nil, err
+	}
+
+	level := cfg.Log.SlogLevel()
+	switch {
+	case flags.Verbose:
+		level = slog.LevelDebug
+	case flags.Quiet:
+		level = slog.LevelError
 	}
 
 	stderr := progress.NewLockedWriter(os.Stderr)
-
-	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{
-		Level: cfg.Log.SlogLevel(),
-	}))
+	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: level}))
 
 	ollamaClient := llm.NewOllamaClientFromConfig(llm.ClientConfig{
 		BaseURL:          cfg.Ollama.BaseURL,
@@ -33,43 +58,28 @@ func main() {
 		MaxResponseBytes: cfg.Ollama.MaxResponseBytes,
 	}, llm.WithLogger(log))
 
-	cache := buildCache(cfg.Cache.Dir, log)
-	spinner := progress.NewWriter(stderr)
-
-	repoRoot, err := git.RepoRoot()
-	if err != nil {
-		log.Error("failed to find git repo root", "error", err)
-		os.Exit(1)
+	var reporter domain.Progress = progress.NewPlain(stderr)
+	if term.IsTerminal(int(os.Stderr.Fd())) {
+		reporter = progress.NewWriter(stderr)
 	}
-	gitClient := git.New(repoRoot, log)
 
-	svc := service.New(
-		gitClient,
+	return service.New(
+		git.New("", log),
 		ollamaClient,
-		cache,
+		buildCache(cfg.Cache.Dir, log),
 		ollamaClient.Model(),
 		log,
-		service.WithProgress(spinner),
+		service.WithProgress(reporter),
 		service.WithChunkThreshold(cfg.Service.ChunkThreshold),
 		service.WithMaxConcurrency(cfg.Service.MaxConcurrency),
 		service.WithMaxRetries(cfg.Service.MaxRetries),
 		service.WithRetryBaseDelay(cfg.Service.RetryBaseDelay()),
-	)
-
-	app, err := cli.NewAppWithService(svc)
-	if err != nil {
-		log.Error("failed to initialise application", "error", err)
-		os.Exit(1)
-	}
-
-	if err := app.Execute(); err != nil {
-		os.Exit(1)
-	}
+	), nil
 }
 
 func buildCache(dir string, log *slog.Logger) service.Cache {
 	if dir == "" {
-		log.Error("could not resolve cache dir, caching disabled")
+		log.Warn("could not resolve cache dir, caching disabled")
 		return service.NoopCache{}
 	}
 	log.Debug("cache enabled", "dir", dir)

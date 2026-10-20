@@ -553,3 +553,59 @@ func TestApp_TwoInstances_DoNotShareState(t *testing.T) {
 		t.Errorf("app2: expected %q, got %q", "fix: two", buf2.String())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Lazy construction
+// ---------------------------------------------------------------------------
+
+func TestNewLazyApp_HelpDoesNotBuildService(t *testing.T) {
+	built := false
+	app := cli.NewLazyApp(func(cli.GlobalFlags) (*service.Service, error) {
+		built = true
+		return nil, errors.New("must not be called")
+	})
+
+	var out bytes.Buffer
+	app.RootCmd().SetOut(&out)
+	app.RootCmd().SetArgs([]string{"--help"})
+	if err := app.Execute(); err != nil {
+		t.Fatalf("--help: %v", err)
+	}
+	if built {
+		t.Error("--help must not construct the service")
+	}
+	if !strings.Contains(out.String(), "devmate") {
+		t.Errorf("expected help output, got %q", out.String())
+	}
+}
+
+func TestNewLazyApp_CommandBuildsServiceWithFlags(t *testing.T) {
+	var got cli.GlobalFlags
+	app := cli.NewLazyApp(func(f cli.GlobalFlags) (*service.Service, error) {
+		got = f
+		return service.New(nil, &stubLLM{response: "feat/x"}, service.NoopCache{}, "m", noopLogger()), nil
+	})
+
+	var out bytes.Buffer
+	app.RootCmd().SetOut(&out)
+	app.RootCmd().SetArgs([]string{"--config", "/tmp/c.json", "--verbose", "branch", "add x"})
+	if err := app.Execute(); err != nil {
+		t.Fatalf("branch: %v", err)
+	}
+	if got.ConfigPath != "/tmp/c.json" || !got.Verbose || got.Quiet {
+		t.Errorf("builder received wrong flags: %+v", got)
+	}
+	if !strings.Contains(out.String(), "feat/x") {
+		t.Errorf("expected branch output, got %q", out.String())
+	}
+}
+
+func TestNewLazyApp_BuilderError_Propagates(t *testing.T) {
+	app := cli.NewLazyApp(func(cli.GlobalFlags) (*service.Service, error) {
+		return nil, errors.New("bad config")
+	})
+	app.RootCmd().SetArgs([]string{"commit"})
+	if err := app.Execute(); err == nil || !strings.Contains(err.Error(), "bad config") {
+		t.Errorf("expected builder error, got %v", err)
+	}
+}

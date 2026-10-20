@@ -4,6 +4,7 @@ import (
 	"devmate/internal/domain"
 	"devmate/internal/service"
 	"fmt"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 )
@@ -16,23 +17,17 @@ type CacheService interface {
 }
 
 func newCacheCmd(a *App) *cobra.Command {
-	cacheCmd := &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "cache",
 		Short: "Manage the local LLM response cache",
 		Long: `Inspect and manage the on-disk cache of LLM responses.
 
-devmate stores responses from the LLM in a local cache directory
-(default: ~/.cache/devmate/) so that repeated requests with identical
-inputs are served instantly without contacting the LLM.
-
-Subcommands:
-  clean   Remove all cached entries
-  stat    List all cached entries with size and age
-`,
+Responses are cached per input so repeated requests with identical inputs are
+served instantly without contacting the LLM.`,
 	}
-	cacheCmd.AddCommand(newCacheCleanCmd(a))
-	cacheCmd.AddCommand(newCacheStatCmd(a))
-	return cacheCmd
+	cmd.AddCommand(newCacheCleanCmd(a))
+	cmd.AddCommand(newCacheStatCmd(a))
+	return cmd
 }
 
 func newCacheCleanCmd(a *App) *cobra.Command {
@@ -41,12 +36,8 @@ func newCacheCleanCmd(a *App) *cobra.Command {
 		Short: "Remove all cached LLM responses",
 		Long: `Deletes every entry from the local LLM response cache.
 
-After running this command the next request for any command (commit, branch, pr)
-will contact the LLM even if the same input was seen before.
-
-This is useful after upgrading the model, changing templates, or when you
-suspect a stale response is being served.
-`,
+Useful after upgrading the model, changing templates, or when you suspect a
+stale response is being served.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if a.cacheService == nil {
@@ -65,14 +56,8 @@ func newCacheStatCmd(a *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stat",
 		Short: "List all cached LLM responses",
-		Long: `Prints a summary of every entry currently in the local LLM response cache.
-
-Each line shows the cache key (a SHA-256 hex digest), the size of the stored
-response in bytes, and when the entry was last written.
-
-Output is sorted newest-first so the most recently used entries appear at
-the top.
-`,
+		Long: `Prints every entry in the local LLM response cache with its key (a SHA-256
+hex digest), size in bytes, and last-written time, newest first.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if a.cacheService == nil {
@@ -87,15 +72,12 @@ the top.
 				fmt.Fprintln(out, "No cached entries.")
 				return nil
 			}
-			fmt.Fprintf(out, "%-64s  %10s  %s\n", "KEY", "SIZE (B)", "MODIFIED")
+			w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+			fmt.Fprintln(w, "KEY\tSIZE (B)\tMODIFIED")
 			for _, e := range entries {
-				fmt.Fprintf(out, "%-64s  %10d  %s\n",
-					e.Key,
-					e.SizeBytes,
-					e.ModTime.Format("2006-01-02 15:04:05"),
-				)
+				fmt.Fprintf(w, "%s\t%d\t%s\n", e.Key, e.SizeBytes, e.ModTime.Format("2006-01-02 15:04:05"))
 			}
-			return nil
+			return w.Flush()
 		},
 	}
 }

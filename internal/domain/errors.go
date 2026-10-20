@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 )
 
 // ─── Validation errors ────────────────────────────────────────────────────────
@@ -24,7 +25,8 @@ var ErrEmptyRef = errors.New("ref name must not be empty")
 
 // ─── Service errors ───────────────────────────────────────────────────────────
 
-// ErrLLMNoAttemptsSucceed is wrapped together with the last LLM error once all retries fail.
+// ErrLLMNoAttemptsSucceed wraps the last LLM error once all retries are exhausted.
+// Non-retryable errors (bad request, unknown model) are returned without this wrapper.
 var ErrLLMNoAttemptsSucceed = errors.New("LLM generate: all attempts failed")
 var ErrLLMNoConfigured = errors.New("service: llm is not configured (nil)")
 var ErrLLMRequestFailed = errors.New("LLM request failed")
@@ -33,3 +35,21 @@ var ErrLLMBuildRequestFailed = errors.New("LLM build request failed")
 var ErrLLMDecodeResponseFailed = errors.New("LLM decode response failed")
 var ErrChunkFailed = errors.New("chunk summarization failed")
 var ErrReduceFailed = errors.New("summary reduction failed")
+
+// LLMStatusError is returned when the LLM server answers with a non-2xx status.
+type LLMStatusError struct {
+	Code    int
+	Message string
+}
+
+func (e *LLMStatusError) Error() string {
+	if e.Message != "" {
+		return fmt.Sprintf("LLM server returned status %d: %s", e.Code, e.Message)
+	}
+	return fmt.Sprintf("LLM server returned status %d", e.Code)
+}
+
+// Retryable reports whether the status indicates a transient server-side condition.
+func (e *LLMStatusError) Retryable() bool {
+	return e.Code == 408 || e.Code == 429 || e.Code >= 500
+}

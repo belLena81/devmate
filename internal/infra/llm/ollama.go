@@ -86,14 +86,6 @@ type generateResponse struct {
 	Done     bool   `json:"done"`
 }
 
-type ollamaStatusError struct {
-	code int
-}
-
-func (e *ollamaStatusError) Error() string {
-	return fmt.Sprintf("ollama: unexpected status %d", e.code)
-}
-
 // Generate sends prompt to Ollama and returns the full response text in one
 // non-streaming request. It makes a single attempt; retries live in the service layer.
 func (c *OllamaClient) Generate(ctx context.Context, prompt string) (string, error) {
@@ -134,7 +126,7 @@ func (c *OllamaClient) doGenerate(ctx context.Context, body []byte) (string, err
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", &ollamaStatusError{code: resp.StatusCode}
+		return "", &domain.LLMStatusError{Code: resp.StatusCode, Message: readErrorMessage(resp.Body)}
 	}
 
 	var result generateResponse
@@ -145,4 +137,15 @@ func (c *OllamaClient) doGenerate(ctx context.Context, body []byte) (string, err
 	text := strings.TrimSpace(result.Response)
 	c.log.Debug("generate response received", "response_bytes", len(text))
 	return text, nil
+}
+
+// readErrorMessage extracts the "error" field Ollama sends with non-2xx responses.
+func readErrorMessage(r io.Reader) string {
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r, 4096)).Decode(&body); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(body.Error)
 }

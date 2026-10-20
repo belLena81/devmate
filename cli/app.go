@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"devmate/internal/domain"
 	"devmate/internal/infra/git"
 	"devmate/internal/service"
@@ -9,8 +10,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// GlobalFlags holds the persistent root flags, available to a ServiceBuilder once parsing is done.
+type GlobalFlags struct {
+	ConfigPath string
+	Verbose    bool
+	Quiet      bool
+}
+
+// ServiceBuilder constructs the fully wired service for the parsed flags.
+type ServiceBuilder func(GlobalFlags) (*service.Service, error)
+
 type App struct {
 	rootCmd       *cobra.Command
+	flags         GlobalFlags
+	build         ServiceBuilder
 	commitService CommitService
 	branchService BranchService
 	prService     PrService
@@ -20,15 +33,7 @@ type App struct {
 // NewApp constructs the CLI application wired to llm, with caching disabled.
 func NewApp(llm domain.LLM) (*App, error) {
 	log := slog.Default()
-
-	repoRoot, err := git.RepoRoot()
-	if err != nil {
-		log.Error("failed to find git repo root", "error", err)
-		return nil, err
-	}
-	gitClient := git.New(repoRoot, log)
-
-	svc := service.New(gitClient, llm, service.NoopCache{}, "", log)
+	svc := service.New(git.New("", log), llm, service.NoopCache{}, "", log)
 	return newAppFromService(svc), nil
 }
 
@@ -37,19 +42,47 @@ func NewAppWithService(svc *service.Service) (*App, error) {
 	return newAppFromService(svc), nil
 }
 
-func newAppFromService(svc *service.Service) *App {
-	app := &App{
-		commitService: svc,
-		branchService: svc,
-		prService:     svc,
-		cacheService:  newCacheSvcAdapter(svc.Cache()),
-	}
+// NewLazyApp defers service construction until a command actually runs, so
+// help, version and completion work without a config file or a git repository.
+func NewLazyApp(build ServiceBuilder) *App {
+	app := &App{build: build}
 	app.rootCmd = buildRootCmd(app)
 	return app
 }
 
+func newAppFromService(svc *service.Service) *App {
+	app := &App{}
+	app.wire(svc)
+	app.rootCmd = buildRootCmd(app)
+	return app
+}
+
+func (a *App) wire(svc *service.Service) {
+	a.commitService = svc
+	a.branchService = svc
+	a.prService = svc
+	a.cacheService = newCacheSvcAdapter(svc.Cache())
+}
+
+func (a *App) ensureServices(*cobra.Command, []string) error {
+	if a.build == nil || a.commitService != nil {
+		return nil
+	}
+	svc, err := a.build(a.flags)
+	if err != nil {
+		return err
+	}
+	a.wire(svc)
+	return nil
+}
+
 func (a *App) Execute() error {
 	return a.rootCmd.Execute()
+}
+
+// ExecuteContext runs the CLI with ctx, which is forwarded to every command and cancels in-flight LLM calls.
+func (a *App) ExecuteContext(ctx context.Context) error {
+	return a.rootCmd.ExecuteContext(ctx)
 }
 
 func (a *App) RootCmd() *cobra.Command {

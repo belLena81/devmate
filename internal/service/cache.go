@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -67,7 +67,29 @@ func (c *DiskCache) Set(key, value string) error {
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(c.dir, key), []byte(value), 0o644)
+	return writeFileAtomic(filepath.Join(c.dir, key), []byte(value))
+}
+
+// writeFileAtomic writes data to a temp file in the same directory and renames it into place,
+// so concurrent readers never observe a partially written entry.
+func writeFileAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 func (c *DiskCache) Clear() error {
@@ -109,7 +131,7 @@ func (c *DiskCache) Stat() ([]CacheEntry, error) {
 
 	result := make([]CacheEntry, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".tmp-") {
 			continue
 		}
 		info, err := e.Info()
@@ -123,8 +145,8 @@ func (c *DiskCache) Stat() ([]CacheEntry, error) {
 		})
 	}
 
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].ModTime.After(result[j].ModTime)
+	slices.SortFunc(result, func(a, b CacheEntry) int {
+		return b.ModTime.Compare(a.ModTime)
 	})
 
 	return result, nil

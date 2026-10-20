@@ -2,7 +2,7 @@ package service
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -107,8 +107,8 @@ func PackChunks(diff string, maxSize int) []Chunk {
 		})
 	}
 
-	sort.Slice(items, func(i, j int) bool {
-		return len(items[i].content) > len(items[j].content)
+	slices.SortStableFunc(items, func(a, b namedDiff) int {
+		return len(b.content) - len(a.content)
 	})
 
 	var chunks []Chunk

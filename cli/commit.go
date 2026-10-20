@@ -22,106 +22,37 @@ type CommitService interface {
 }
 
 func newCommitCmd(a *App) *cobra.Command {
-	var rawCmdType string
-	var explain, rawShort, rawDetailed, noCache bool
+	var f generateFlags
 
-	validateAndRunCommit := func(cmd *cobra.Command, args []string) error {
-		commitOpts, err := NewCommit(rawCmdType, rawShort, rawDetailed, explain, noCache)
-		if err != nil {
-			return err
-		}
-		if a.commitService == nil {
-			return domain.ErrServiceNotInitialized
-		}
-		msg, err := a.commitService.DraftMessage(cmd.Context(), commitOpts)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintln(cmd.OutOrStdout(), msg)
-		return nil
-	}
-
-	commitCmd := &cobra.Command{
-		Use:   "commit [-t feat|fix|chore|docs|refactor] [--short|--detailed] [--explain] [--no-cache]",
-		Short: "Create a commit message from the given diff",
+	cmd := &cobra.Command{
+		Use:   "commit",
+		Short: "Draft a commit message from the staged diff",
 		Long: `Analyzes staged changes (git diff --cached) and drafts a Conventional Commit message.
 
-The command reads the current repository state in read-only mode and generates
-a suggested commit message using the configured LLM.
-
-By default, Devmate auto-detects the most appropriate commit type (feat, fix,
-chore, docs, refactor). You may explicitly provide a type override using --type.
-
-The output is plain text written to stdout. Devmate never executes git commit
-or mutates repository state.
-
-Flags:
-  -t, --type string     Override commit type (feat, fix, chore, docs, refactor)
-      --explain         Provide reasoning behind the suggested commit message
-      --short           Generate a concise commit message (default)
-      --detailed        Generate a more descriptive commit message
-      --no-cache        Bypass the response cache and always call the LLM;
-                        the fresh response overwrites any existing cached entry
-
-Note:
-  --short and --detailed are mutually exclusive.
-  If neither is provided, a short format is used.
-`,
+By default the commit type (feat, fix, chore, docs, refactor) is auto-detected;
+use --type to force one. The message is written to stdout. devmate never runs
+git commit or mutates repository state.`,
+		Example: `  devmate commit
+  devmate commit --type fix --detailed
+  devmate commit --explain --no-cache`,
 		Args: cobra.NoArgs,
-		RunE: validateAndRunCommit,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			opts, err := NewCommit(f.cmdType, f.short, f.detailed, f.explain, f.noCache)
+			if err != nil {
+				return err
+			}
+			if a.commitService == nil {
+				return domain.ErrServiceNotInitialized
+			}
+			msg, err := a.commitService.DraftMessage(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), msg)
+			return nil
+		},
 	}
 
-	commitCmd.Flags().StringVarP(
-		&rawCmdType,
-		"type",
-		"t",
-		"",
-		"force commit type (feat, fix, chore, docs, refactor)",
-	)
-
-	commitCmd.Flags().BoolVar(
-		&explain,
-		"explain",
-		false,
-		"explain why this commit message was generated",
-	)
-
-	commitCmd.Flags().BoolVar(
-		&rawShort,
-		"short",
-		false,
-		"generate short single-line commit message (default)",
-	)
-
-	commitCmd.Flags().BoolVar(
-		&rawDetailed,
-		"detailed",
-		false,
-		"generate detailed commit message with body",
-	)
-
-	commitCmd.Flags().BoolVar(
-		&noCache,
-		"no-cache",
-		false,
-		"bypass the response cache and always call the LLM",
-	)
-
-	commitCmd.MarkFlagsMutuallyExclusive("short", "detailed")
-	return commitCmd
-}
-
-func parseCmdType(raw string) (domain.CmdType, error) {
-	cmdType, ok := domain.CmdTypeIndex[raw]
-	if !ok {
-		return domain.Undefined, domain.ErrInvalidCmdType
-	}
-	return cmdType, nil
-}
-
-func parseCmdMode(detailed bool) domain.CmdMode {
-	if detailed {
-		return domain.Detailed
-	}
-	return domain.Short
+	bindGenerateFlags(cmd, &f, "commit message")
+	return cmd
 }

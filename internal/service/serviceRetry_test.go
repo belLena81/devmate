@@ -406,3 +406,64 @@ func TestBuildPrSynthesisPrompt_ContainsTitleInstruction(t *testing.T) {
 		t.Errorf("synthesis prompt should request PR title, got:\n%s", prompt)
 	}
 }
+
+// ─── Retry classification ────────────────────────────────────────────────────
+
+type statusLLM struct {
+	calls atomic.Int32
+	code  int
+}
+
+func (l *statusLLM) Generate(context.Context, string) (string, error) {
+	l.calls.Add(1)
+	return "", &domain.LLMStatusError{Code: l.code, Message: "model not found"}
+}
+
+func TestGenerateWithRetry_ClientStatus_NotRetried(t *testing.T) {
+	llm := &statusLLM{code: 404}
+	svc := Service{llm: llm, log: noopLogger(), maxRetries: 3, retryBaseDelay: testRetryDelay}
+
+	_, err := svc.GenerateWithRetry(context.Background(), "prompt")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if llm.calls.Load() != 1 {
+		t.Errorf("expected a single attempt for a 404, got %d", llm.calls.Load())
+	}
+	if errors.Is(err, domain.ErrLLMNoAttemptsSucceed) {
+		t.Errorf("non-retryable error must not be wrapped as exhaustion: %v", err)
+	}
+	var status *domain.LLMStatusError
+	if !errors.As(err, &status) || status.Code != 404 {
+		t.Errorf("expected the status error to be returned as-is, got %v", err)
+	}
+}
+
+func TestGenerateWithRetry_ServerStatus_Retried(t *testing.T) {
+	llm := &statusLLM{code: 503}
+	svc := Service{llm: llm, log: noopLogger(), maxRetries: 2, retryBaseDelay: testRetryDelay}
+
+	_, err := svc.GenerateWithRetry(context.Background(), "prompt")
+	if !errors.Is(err, domain.ErrLLMNoAttemptsSucceed) {
+		t.Errorf("expected exhaustion error, got %v", err)
+	}
+	if llm.calls.Load() != 3 {
+		t.Errorf("expected 3 attempts for a 503, got %d", llm.calls.Load())
+	}
+}
+
+func TestGenerateWithRetry_CancelledContext_ReturnsImmediately(t *testing.T) {
+	llm := &countingLLM{failTimes: 10}
+	svc := Service{llm: llm, log: noopLogger(), maxRetries: 5, retryBaseDelay: time.Second}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := svc.GenerateWithRetry(ctx, "prompt")
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+	if llm.calls.Load() != 0 {
+		t.Errorf("expected no LLM calls with a cancelled context, got %d", llm.calls.Load())
+	}
+}

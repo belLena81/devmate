@@ -138,30 +138,63 @@ go build ./cmd/devmate
 go install github.com/belLena81/devmate/cmd/devmate@latest
 ```
 
-**Requirements:** Go 1.25+, Git, [Ollama](https://ollama.com)
+**Requirements:** Go 1.26+, Git 2.24+, [Ollama](https://ollama.com)
+
+Build with a version string baked in:
+
+```sh
+go build -ldflags "-X devmate/cli.Version=v1.0.0" ./cmd/devmate
+```
+
+## Global flags
+
+| Flag | Description |
+|---|---|
+| `--config <path>` | Config file to load (see Configuration for the default location) |
+| `-v, --verbose` | Debug logging, including config resolution |
+| `-q, --quiet` | Log errors only |
+| `--version` | Print the version and exit |
+
+`--help`, `--version` and `completion` work anywhere; only `commit`, `branch` and `pr` need a git repository, and only they contact the LLM.
+
+Ctrl-C cancels in-flight LLM requests and exits with status 130. Errors are printed once to stderr as `Error: ...` and exit with status 1.
+
+**Shell completion:**
+
+```sh
+source <(devmate completion bash)   # or zsh, fish, powershell
+```
+
+Completion also offers the valid values for `--type`.
 
 ## Configuration
 
 Settings are resolved in this priority order: **env vars → config file → built-in defaults**.
 
-The config file lives at `./config/config.json` relative to the working directory (commit it to the repo to share settings with the team). Override the path with `DEVMATE_CONFIG`.
+The config file is looked up in this order:
 
-**`config/config.json` (all fields optional — defaults shown):**
+1. `--config <path>` flag
+2. `DEVMATE_CONFIG` env var
+3. The per-user config directory: `~/.config/devmate/config.json` on Linux, `~/Library/Application Support/devmate/config.json` on macOS, `%AppData%\devmate\config.json` on Windows
+
+A missing file is not an error. `config.example.json` in the repository root is a starting point.
+
+**`config.json` (all fields optional — defaults shown):**
 
 ```json
 {
   "ollama": {
     "base_url": "http://localhost:11434",
+    "generate_path": "/api/generate",
     "model": "llama3.2:3b",
     "request_timeout_sec": 180,
-    "http_max_retries": 0,
-    "retry_base_delay_sec": 0
+    "max_response_bytes": 10485760
   },
   "service": {
     "chunk_threshold": 3000,
     "max_concurrency": 2,
     "max_retries": 0,
-    "retry_base_delay_sec": 2
+    "retry_base_delay_sec": 1
   },
   "cache": {
     "dir": ""
@@ -172,34 +205,35 @@ The config file lives at `./config/config.json` relative to the working director
 }
 ```
 
+An empty `cache.dir` means the per-user cache directory (see Caching).
+
 **Environment variables:**
 
 | Variable | Overrides |
 |---|---|
 | `DEVMATE_CONFIG` | Config file path |
 | `DEVMATE_OLLAMA_BASE_URL` | `ollama.base_url` |
+| `DEVMATE_OLLAMA_GENERATE_PATH` | `ollama.generate_path` |
 | `DEVMATE_OLLAMA_MODEL` | `ollama.model` |
-| `DEVMATE_OLLAMA_REQUEST_TIMEOUT_SEC` | `ollama.request_timeout_sec` |
-| `DEVMATE_OLLAMA_HTTP_MAX_RETRIES` | `ollama.http_max_retries` |
-| `DEVMATE_OLLAMA_RETRY_BASE_DELAY_SEC` | `ollama.retry_base_delay_sec` |
-| `DEVMATE_SERVICE_CHUNK_THRESHOLD` | `service.chunk_threshold` |
-| `DEVMATE_SERVICE_MAX_CONCURRENCY` | `service.max_concurrency` |
-| `DEVMATE_SERVICE_MAX_RETRIES` | `service.max_retries` |
-| `DEVMATE_SERVICE_RETRY_BASE_DELAY_SEC` | `service.retry_base_delay_sec` |
+| `DEVMATE_REQUEST_TIMEOUT_SEC` | `ollama.request_timeout_sec` |
+| `DEVMATE_MAX_RESPONSE_BYTES` | `ollama.max_response_bytes` |
+| `DEVMATE_CHUNK_THRESHOLD` | `service.chunk_threshold` |
+| `DEVMATE_MAX_CONCURRENCY` | `service.max_concurrency` |
+| `DEVMATE_MAX_RETRIES` | `service.max_retries` |
+| `DEVMATE_RETRY_BASE_DELAY_SEC` | `service.retry_base_delay_sec` |
 | `DEVMATE_CACHE_DIR` | `cache.dir` |
-| `DEVMATE_LOG_LEVEL` | `log.level` |
+| `DEVMATE_LOG_LEVEL` | `log.level` (`debug`, `info`, `warn`, `error`) |
 
-All integer env vars are validated at startup: a non-integer value (e.g. `DEVMATE_SERVICE_MAX_RETRIES=two`) causes `Load()` to return a descriptive error rather than crash.
+Integer variables are validated at startup: a non-integer value such as `DEVMATE_MAX_RETRIES=two` is reported as an error instead of being ignored. Empty values are ignored.
 
-**Seeing config load progress:** Set `DEVMATE_LOG_LEVEL=debug` to see which values were loaded from the file, which came from env vars, and which fell back to defaults:
+**Seeing config load progress:** run with `--verbose` (or `DEVMATE_LOG_LEVEL=debug`) to see which values came from the file, which from env vars, and the resolved result:
 
 ```
-level=DEBUG component=config msg="config file loaded" path=config/config.json
+level=DEBUG component=config msg="config file loaded" path=/home/me/.config/devmate/config.json
 level=DEBUG component=config msg="file override" key=ollama.model value=mistral:7b
+level=DEBUG component=config msg="env override" key=DEVMATE_MAX_RETRIES value=3
 level=DEBUG component=config msg="config resolved" ollama.base_url=http://localhost:11434 ...
 ```
-
-If no config file is present, all built-in defaults are used with no error.
 
 ## LLM pipeline
 
@@ -214,7 +248,7 @@ This keeps every prompt within the model's context window regardless of reposito
 
 ## Caching
 
-Responses are cached to `~/.cache/devmate` (overridable via `cache.dir` or `DEVMATE_CACHE_DIR`). Cache keys are derived from: model name, binary hash, git input (diff or commit list), and all option flags. Changing any of these produces a new key. Changing the binary invalidates all prior entries automatically.
+Responses are cached in the per-user cache directory (`~/.cache/devmate` on Linux, `~/Library/Caches/devmate` on macOS, `%LocalAppData%\devmate` on Windows), overridable via `cache.dir` or `DEVMATE_CACHE_DIR`. Entries are written atomically, so concurrent runs never read a partial entry. Cache keys are derived from: model name, binary hash, git input (diff or commit list), and all option flags. Changing any of these produces a new key. Changing the binary invalidates all prior entries automatically.
 
 Pass `--no-cache` to `commit`, `branch`, or `pr` to bypass the cache for a single run. The LLM is always called and its fresh response overwrites the existing cached entry, so subsequent ordinary calls immediately serve the updated value. Use this when you want a different suggestion for the same input without clearing the entire cache.
 
@@ -222,29 +256,38 @@ Use `devmate cache stat` to inspect the cache and `devmate cache clean` to wipe 
 
 ## Retry behaviour
 
-devmate has two independent retry layers:
+Every LLM call goes through a single retry site in the service layer. A failed call is retried up to `service.max_retries` times (default 0, i.e. one attempt) with exponential back-off starting at `service.retry_base_delay_sec` (default 1 s) and doubling each time.
 
-- **HTTP retries** (`ollama.http_max_retries`, default 0) — the Ollama client retries transient HTTP failures with exponential back-off starting at `ollama.retry_base_delay_sec`.
-- **Service retries** (`service.max_retries`, default 0) — an additional safety net at the service layer, on top of HTTP retries. Back-off starts at `service.retry_base_delay_sec` (default 2 s) and doubles on each attempt.
+Only transient failures are retried: connection errors, timeouts, and HTTP 408, 429 and 5xx responses. Client-side failures such as an unknown model (404) or a malformed request are reported immediately. Ctrl-C aborts the current attempt and any pending back-off.
 
 ## Project structure
 
 ```
-cmd/devmate/          entry point — loads config, wires dependencies, runs CLI
-cli/                  Cobra commands and option parsing
+cmd/devmate/          entry point — signal handling, config, dependency wiring
+cli/                  Cobra commands, global flags, shared generate flags
   cache.go            cache clean and cache stat subcommands
 internal/
-  config/             unified configuration (file + env + defaults)
-  domain/             core interfaces (LLM, GitClient, Progress)
+  config/             configuration (defaults + JSON file + env vars)
+  domain/             core interfaces and errors (LLM, GitClient, Progress)
   service/            orchestration — chunking, map-reduce, caching, retry
     cache.go          Cache interface, DiskCache, CacheInspector, NoopCache
   infra/
     git/              read-only Git runner (diff, log)
-    llm/              Ollama HTTP client with retry
-    progress/         terminal spinner
+    llm/              Ollama HTTP client (single attempt per call)
+    progress/         terminal spinner and plain-text reporter for non-TTY output
 ```
 
 Dependency direction: `CLI → Service → Domain ← Infrastructure`. Infrastructure never imports service or CLI packages.
+
+## Dependencies
+
+| Module | Used for |
+|---|---|
+| `github.com/spf13/cobra` | Command tree, flags, help, shell completion |
+| `github.com/caarlos0/env/v11` | Typed `DEVMATE_*` env var overlay via struct tags |
+| `github.com/cenkalti/backoff/v4` | Exponential back-off for LLM retries |
+| `golang.org/x/sync/errgroup` | Bounded worker pool for parallel chunk summarisation |
+| `golang.org/x/term` | Terminal detection to choose spinner vs plain progress output |
 
 ## Testing
 
@@ -263,3 +306,19 @@ Tests use interface-based fakes — no real Git repository or Ollama instance is
 - **Text in, text out** — the LLM has no system authority; its output is untrusted text printed to stdout.
 - **Explicit over magic** — no reflection, no hidden side effects, no autonomous behaviour.
 - **You review. You decide.** — devmate drafts; you commit.
+
+## Further enhancements
+
+Dependencies and tooling that would fit the current design if the project grows:
+
+| Candidate | What it would add |
+|---|---|
+| `github.com/knadh/koanf` or `github.com/spf13/viper` | Config layering with more sources (YAML/TOML, flags) and per-key provenance |
+| `github.com/ollama/ollama/api` | Official Ollama client with streaming and `OLLAMA_HOST` support; large dependency tree |
+| `github.com/charmbracelet/glamour` | Render the markdown PR description in the terminal while keeping plain text when piped |
+| `github.com/charmbracelet/lipgloss` or `github.com/fatih/color` | Coloured output that honours `NO_COLOR` |
+| `github.com/pkoukk/tiktoken-go` | Chunk thresholds measured in tokens instead of bytes |
+| `github.com/google/renameio/v2` | Cross-platform atomic file writes if the cache grows beyond simple entries |
+| `github.com/stretchr/testify` | Assertion helpers; the standard-library tests are intentionally kept dependency-free |
+| `goreleaser` | Release builds with the version injected via `-ldflags` |
+| `golangci-lint`, `govulncheck` | Linting and vulnerability scanning in CI |
