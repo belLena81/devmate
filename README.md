@@ -129,16 +129,22 @@ Cache cleared.
 ```sh
 git clone https://github.com/belLena81/devmate
 cd devmate
-go build ./cmd/devmate
+go build ./cmd/devmate          # binary in the current directory
+go install ./cmd/devmate        # or install into $GOPATH/bin
 ```
 
-**Via `go install`:**
-
-```sh
-go install github.com/belLena81/devmate/cmd/devmate@latest
-```
+The module path is `devmate`, so `go install <url>@latest` is not supported; build from a clone.
 
 **Requirements:** Go 1.26+, Git 2.24+, [Ollama](https://ollama.com)
+
+**Running Ollama:** `docker-compose-ollama.yml` starts a tuned Ollama server and `Dockerfile` builds an image with the default model pre-pulled:
+
+```sh
+docker compose -f docker-compose-ollama.yml up -d
+ollama pull llama3.2:3b
+```
+
+The compose file sets `OLLAMA_NUM_PARALLEL=2` to match the default `service.max_concurrency`; raise both together if you increase parallelism.
 
 Build with a version string baked in:
 
@@ -158,6 +164,8 @@ go build -ldflags "-X devmate/cli.Version=v1.0.0" ./cmd/devmate
 `--help`, `--version` and `completion` work anywhere; only `commit`, `branch` and `pr` need a git repository, and only they contact the LLM.
 
 Ctrl-C cancels in-flight LLM requests and exits with status 130. Errors are printed once to stderr as `Error: ...` and exit with status 1.
+
+Results go to stdout only; logs and progress go to stderr, so output can be piped straight into git (`git commit -m "$(devmate commit)"`). Progress is an animated spinner when stderr is a terminal and one plain line per step when it is redirected.
 
 **Shell completion:**
 
@@ -248,7 +256,7 @@ This keeps every prompt within the model's context window regardless of reposito
 
 ## Caching
 
-Responses are cached in the per-user cache directory (`~/.cache/devmate` on Linux, `~/Library/Caches/devmate` on macOS, `%LocalAppData%\devmate` on Windows), overridable via `cache.dir` or `DEVMATE_CACHE_DIR`. Entries are written atomically, so concurrent runs never read a partial entry. Cache keys are derived from: model name, binary hash, git input (diff or commit list), and all option flags. Changing any of these produces a new key. Changing the binary invalidates all prior entries automatically.
+Responses are cached in the per-user cache directory (`~/.cache/devmate` on Linux, `~/Library/Caches/devmate` on macOS, `%LocalAppData%\devmate` on Windows), overridable via `cache.dir` or `DEVMATE_CACHE_DIR`. Entries are written atomically, so concurrent runs never read a partial entry. Cache keys are a SHA-256 over: the prompt template, model name, binary hash, git input (diff or commit list), and all option flags. Changing any of these produces a new key, so editing a template or rebuilding the binary invalidates prior entries automatically.
 
 Pass `--no-cache` to `commit`, `branch`, or `pr` to bypass the cache for a single run. The LLM is always called and its fresh response overwrites the existing cached entry, so subsequent ordinary calls immediately serve the updated value. Use this when you want a different suggestion for the same input without clearing the entire cache.
 
@@ -269,15 +277,26 @@ cli/                  Cobra commands, global flags, shared generate flags
 internal/
   config/             configuration (defaults + JSON file + env vars)
   domain/             core interfaces and errors (LLM, GitClient, Progress)
-  service/            orchestration — chunking, map-reduce, caching, retry
+  service/            orchestration — chunking, map-reduce, caching, retry, output sanitisation
     cache.go          Cache interface, DiskCache, CacheInspector, NoopCache
+    _resources/       prompt templates (text/template), embedded into the binary
   infra/
     git/              read-only Git runner (diff, log)
     llm/              Ollama HTTP client (single attempt per call)
     progress/         terminal spinner and plain-text reporter for non-TTY output
 ```
 
-Dependency direction: `CLI → Service → Domain ← Infrastructure`. Infrastructure never imports service or CLI packages.
+Dependency direction: `service` depends only on `domain`; `infra` implements `domain` interfaces and never imports `service` or `cli`; `cli` and `cmd` wire `infra` into `service`. Swapping the LLM or git backend touches only `infra` and the wiring.
+
+## Architecture decisions
+
+- **Shell out to git instead of a Go git library.** `git diff` and `git log` output is exactly what a developer sees, with no reimplementation risk, and the binary stays small. The runner strips `GIT_*` from the environment and passes `--end-of-options` so arguments cannot be read as flags.
+- **Custom Ollama client instead of the official package.** The official module pulls in a large dependency tree. The client is ~150 lines, makes exactly one HTTP attempt per call, and returns typed errors, so retry policy lives in a single place in the service layer.
+- **Chunk threshold in bytes, not tokens.** Token counting needs a model-specific tokenizer. Bytes are model-independent and conservative for code; a token-based threshold is listed under further enhancements.
+- **LLM output is post-processed, never trusted.** Responses are normalised (line endings, trailing whitespace, blank-line runs) and the branch command extracts the first `type/slug` line so preamble from small models never reaches stdout.
+- **Prompts are embedded templates.** Each prompt is a `text/template` file compiled into the binary, so wording changes are data edits, and the template hash is part of the cache key.
+- **Config is resolved once at startup.** Defaults, then the JSON file, then `DEVMATE_*` env vars are merged into one struct that is passed down; nothing below `main` reads the environment.
+- **Caching is content-addressed and invalidated by build.** Including the binary hash in every key means a new build can never serve output produced by old prompts or old logic.
 
 ## Dependencies
 
@@ -295,16 +314,16 @@ Dependency direction: `CLI → Service → Domain ← Infrastructure`. Infrastru
 go test ./...
 ```
 
-Test coverage spans: config loading and env-var validation, CLI option parsing, nil-service guards, service orchestration, map-reduce pipeline, chunker, cache key derivation, disk cache (including `Stat` and `Clear`), prompt templates, sanitisation, Git runner, Ollama client retry logic, and the progress spinner.
+Test coverage spans: config loading, env-var validation and precedence, CLI option parsing, lazy service construction, nil-service guards, service orchestration, map-reduce pipeline and concurrency limits, chunker, cache key derivation, disk cache (including `Stat` and `Clear`), prompt templates, sanitisation, retry classification and exhaustion, context cancellation, Git runner, the Ollama client, and both progress reporters.
 
-Tests use interface-based fakes — no real Git repository or Ollama instance is required.
+Tests use interface-based fakes and `httptest` servers; the Git runner tests create throwaway repositories in a temp dir. No running Ollama instance is required.
 
 ## Design principles
 
 - **Read-only** — devmate never runs `git commit`, `git push`, or any mutating Git command.
 - **Local-first** — works fully offline via Ollama; no external APIs, no telemetry.
 - **Text in, text out** — the LLM has no system authority; its output is untrusted text printed to stdout.
-- **Explicit over magic** — no reflection, no hidden side effects, no autonomous behaviour.
+- **Explicit over magic** — configuration is resolved once and passed down, dependencies are wired in `main`, no hidden side effects, no autonomous behaviour.
 - **You review. You decide.** — devmate drafts; you commit.
 
 ## Further enhancements

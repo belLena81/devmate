@@ -218,3 +218,16 @@ func writeTempConfig(t *testing.T, data any) string {
 	}
 	return path
 }
+
+func TestLoad_EmptyCacheDir_FallsBackToDefault(t *testing.T) {
+	f := writeTempConfig(t, map[string]any{"cache": map[string]any{"dir": ""}})
+	t.Setenv("DEVMATE_CONFIG", f)
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.Cache.Dir != config.DefaultCacheDir() {
+		t.Errorf("Cache.Dir: got %q, want default %q", cfg.Cache.Dir, config.DefaultCacheDir())
+	}
+}

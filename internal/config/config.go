@@ -184,6 +184,9 @@ func LoadWith(o Options) (Config, error) {
 	if err != nil {
 		return cfg, fmt.Errorf("config: %w", err)
 	}
+	if cfg.Cache.Dir == "" {
+		cfg.Cache.Dir = DefaultCacheDir()
+	}
 
 	log.Debug("config resolved",
 		"ollama.base_url", cfg.Ollama.BaseURL,
