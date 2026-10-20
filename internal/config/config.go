@@ -1,40 +1,4 @@
-// Package config provides the application's unified configuration.
-//
-// Settings are resolved in priority order (highest to lowest):
-//
-//  1. Environment variables (DEVMATE_*)
-//  2. Config file            (./config/config.json, or $DEVMATE_CONFIG)
-//  3. Built-in defaults
-//
-// The config file path defaults to ./config/config.json relative to the
-// working directory (the project root). This lets teams commit a shared
-// config.json in the repo. Override with DEVMATE_CONFIG for other paths.
-//
-// The config file is optional. If it does not exist the defaults are used as-is.
-// Unknown keys in the file are silently ignored so older binaries can read newer
-// config files without breaking.
-//
-// Example config file:
-//
-//		{
-//		  "ollama": {
-//		    "base_url": "http://localhost:11434",
-//		    "model":    "llama3.2:3b",
-//		    "request_timeout_sec": 180,
-//		  },
-//		  "service": {
-//		    "chunk_threshold": 3000,
-//		    "max_concurrency": 2,
-//		    "max_retries": 0,
-//	     "retry_base_delay_sec": 1,
-//		  },
-//		  "cache": {
-//		    "dir": ""
-//		  },
-//		  "log": {
-//		    "level": "info"
-//		  }
-//		}
+// Package config loads application settings from built-in defaults, an optional JSON file, and DEVMATE_* environment variables.
 package config
 
 import (
@@ -49,9 +13,6 @@ import (
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 
-// These defaults mirror the values used by each subsystem when no config is
-// provided. They live here as the single authoritative reference that both
-// the config file documentation and the defaults() function use.
 const (
 	DefaultOllamaBaseURL          = "http://localhost:11434"
 	DefaultGeneratePath           = "/api/generate"
@@ -68,8 +29,6 @@ const (
 // ─── Config struct ────────────────────────────────────────────────────────────
 
 // Config is the top-level application configuration.
-// All fields have safe zero values; Load() fills them with defaults and then
-// overlays the config file and environment variables.
 type Config struct {
 	Ollama  OllamaConfig  `json:"ollama"`
 	Service ServiceConfig `json:"service"`
@@ -79,23 +38,13 @@ type Config struct {
 
 // OllamaConfig holds settings for the Ollama LLM client.
 type OllamaConfig struct {
-	// BaseURL is the URL of the Ollama server.
-	// Env: DEVMATE_OLLAMA_BASE_URL
-	BaseURL string `json:"base_url"`
-	// GeneratePath is the path part of the Ollama request URL.
-	// Env: DEVMATE_OLLAMA_GENERATE_PATH
+	BaseURL      string `json:"base_url"`
 	GeneratePath string `json:"generate_path"`
 
-	// Model is the Ollama model tag to use (e.g. "llama3.2:3b").
-	// Env: DEVMATE_OLLAMA_MODEL
 	Model string `json:"model"`
 
-	// RequestTimeoutSec is the per-request timeout in seconds.
-	// Env: DEVMATE_REQUEST_TIMEOUT_SEC
-	RequestTimeoutSec int `json:"request_timeout_sec"`
-	//MaxResponseBytes is the maximum number of bytes to return from the server.
-	// Env: DEVMATE_MAX_RESPONSE_BYTES
-	MaxResponseBytes int64 `json:"max_response_bytes"`
+	RequestTimeoutSec int   `json:"request_timeout_sec"`
+	MaxResponseBytes  int64 `json:"max_response_bytes"`
 }
 
 // RequestTimeout converts RequestTimeoutSec to a time.Duration.
@@ -106,20 +55,13 @@ func (o OllamaConfig) RequestTimeout() time.Duration {
 // ServiceConfig holds settings for the service layer.
 type ServiceConfig struct {
 	// ChunkThreshold is the diff size in bytes above which map-reduce is used.
-	// Env: DEVMATE_CHUNK_THRESHOLD
 	ChunkThreshold int `json:"chunk_threshold"`
 
-	// MaxConcurrency is the maximum number of parallel LLM calls.
-	// 0 means use runtime.NumCPU().
-	// Env: DEVMATE_MAX_CONCURRENCY
+	// MaxConcurrency is the maximum number of parallel LLM calls; 0 means runtime.NumCPU().
 	MaxConcurrency int `json:"max_concurrency"`
 
-	// MaxRetries is the number of service-level retries for failed LLM calls.
-	// Env: DEVMATE_MAX_RETRIES
 	MaxRetries int `json:"max_retries"`
 
-	// RetryBaseDelaySec is the initial exponential back-off delay in seconds.
-	// Env: DEVMATE_RETRY_BASE_DELAY_SEC
 	RetryBaseDelaySec int `json:"retry_base_delay_sec"`
 }
 
@@ -130,16 +72,11 @@ func (s ServiceConfig) RetryBaseDelay() time.Duration {
 
 // CacheConfig holds settings for the disk cache.
 type CacheConfig struct {
-	// Dir is the directory where cached LLM responses are stored.
-	// Defaults to ~/.cache/devmate. Set to "" to use the default.
-	// Env: DEVMATE_CACHE_DIR
 	Dir string `json:"dir"`
 }
 
 // LogConfig holds logging settings.
 type LogConfig struct {
-	// Level controls verbosity: "debug", "info", "warn", "error".
-	// Env: DEVMATE_LOG_LEVEL
 	Level string `json:"level"`
 }
 
@@ -186,16 +123,7 @@ func defaults() Config {
 
 // ─── Load ────────────────────────────────────────────────────────────────────
 
-// Load builds the resolved Config by layering defaults → file → env vars.
-// The config file path is taken from DEVMATE_CONFIG if set, otherwise
-// defaults to ./config/config.json (relative to the working directory).
-//
-// Progress is logged to stderr at DEBUG level so the operator can see exactly
-// which values came from the file, env vars, or built-in defaults.
-// This log uses a fixed debug-level handler that is active before the
-// configured log level is known — it is the bootstrap logger.
-//
-// An absent config file is not an error. Parse errors are returned.
+// Load builds the resolved Config by layering defaults, then the config file, then env vars.
 func Load() (Config, error) {
 	log := bootstrapLogger()
 
@@ -238,19 +166,11 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-// bootstrapLogger returns a debug-level logger that writes to stderr.
-// It is used only during Load() — before the configured log level is known —
-// so the operator can always see config loading progress when needed by
-// setting DEVMATE_LOG_LEVEL=debug before running the binary.
-//
-// We honour DEVMATE_LOG_LEVEL here as a special case: if it is set to anything
-// other than "debug" the bootstrap logger is silenced so config chatter does
-// not appear in normal runs.
+// bootstrapLogger returns the stderr logger used during Load, before the configured log level is known.
 func bootstrapLogger() *slog.Logger {
 	level := slog.LevelDebug
 	if v := os.Getenv("DEVMATE_LOG_LEVEL"); v != "debug" && v != "" {
-		// Non-debug level requested — suppress bootstrap output.
-		level = slog.LevelError + 1 // above all standard levels → silent
+		level = slog.LevelError + 1
 	}
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: level,
@@ -259,15 +179,6 @@ func bootstrapLogger() *slog.Logger {
 
 // ─── File loading ─────────────────────────────────────────────────────────────
 
-// configFilePath returns the path to the config file to load.
-//
-// Resolution order:
-//  1. DEVMATE_CONFIG env var (absolute or relative path)
-//  2. ./config/config.json (relative to the current working directory,
-//     i.e. the project root when running "devmate" from the repo)
-//
-// Using a repo-relative path as the default makes it easy to commit a shared
-// team config alongside the source code without any per-user setup.
 func configFilePath() string {
 	if p := os.Getenv("DEVMATE_CONFIG"); p != "" {
 		return p
@@ -275,11 +186,7 @@ func configFilePath() string {
 	return filepath.Join("config", "config.json")
 }
 
-// loadFile reads a JSON config file into cfg.
-// Returns (true, nil) when the file was found and parsed successfully.
-// Returns (false, nil) when the file does not exist — that is not an error.
-// Logs each field that differs from the defaults so the operator can see
-// exactly what the file changed.
+// loadFile reads a JSON config file into cfg; a missing file returns (false, nil).
 func loadFile(path string, cfg *Config, log *slog.Logger) (loaded bool, err error) {
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
@@ -290,7 +197,6 @@ func loadFile(path string, cfg *Config, log *slog.Logger) (loaded bool, err erro
 	}
 	defer f.Close()
 
-	// Snapshot defaults so we can compare after decoding.
 	before := *cfg
 
 	dec := json.NewDecoder(f)
@@ -303,7 +209,6 @@ func loadFile(path string, cfg *Config, log *slog.Logger) (loaded bool, err erro
 	return true, nil
 }
 
-// logFileOverrides logs each field whose value changed after loading the file.
 func logFileOverrides(log *slog.Logger, before, after Config) {
 	if before.Ollama.BaseURL != after.Ollama.BaseURL {
 		log.Debug("file override", "key", "ollama.base_url", "value", after.Ollama.BaseURL)
@@ -342,12 +247,7 @@ func logFileOverrides(log *slog.Logger, before, after Config) {
 
 // ─── Env-var overlay ──────────────────────────────────────────────────────────
 
-// applyEnv overrides any field for which the corresponding DEVMATE_* env var
-// is set to a non-empty string. Returns (count, error) where count is the
-// number of overrides applied and error is non-nil if any integer env var
-// held an invalid value.
-// Each override is logged individually so the operator can see exactly which
-// env vars are in effect.
+// applyEnv overlays non-empty DEVMATE_* env vars onto cfg and returns the number of overrides applied.
 func applyEnv(cfg *Config, log *slog.Logger) (int, error) {
 	count := 0
 	override := func(key, val string, apply func()) {
@@ -417,9 +317,6 @@ func applyEnv(cfg *Config, log *slog.Logger) (int, error) {
 	return count, nil
 }
 
-// parseIntEnv parses s as an integer for the named environment variable.
-// It returns a descriptive error on failure so Load() can surface a clear
-// message instead of crashing the process with a raw panic trace.
 func parseIntEnv(s, name string) (int, error) {
 	n, err := strconv.Atoi(s)
 	if err != nil {
@@ -428,9 +325,6 @@ func parseIntEnv(s, name string) (int, error) {
 	return n, nil
 }
 
-// parseIntEnv parses s as an integer for the named environment variable.
-// It returns a descriptive error on failure so Load() can surface a clear
-// message instead of crashing the process with a raw panic trace.
 func parseInt64Env(s, name string) (int64, error) {
 	n, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {

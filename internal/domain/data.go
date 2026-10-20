@@ -23,8 +23,7 @@ const (
 	cmdTypeSentinel // marks the end of valid CmdType constants
 )
 
-// String returns the kebab-case name for the type, or ErrInvalidCmdType for
-// unknown values.
+// String returns the kebab-case name for the type, or ErrInvalidCmdType for unknown values.
 func (t CmdType) String() (string, error) {
 	switch t {
 	case Undefined:
@@ -44,8 +43,7 @@ func (t CmdType) String() (string, error) {
 	}
 }
 
-// CmdTypeIndex maps type strings back to CmdType constants.
-// Used by CLI flag parsing to convert user input to a typed value.
+// CmdTypeIndex maps type names back to CmdType constants.
 var CmdTypeIndex = func() map[string]CmdType {
 	index := make(map[string]CmdType)
 	for t := Undefined; t < cmdTypeSentinel; t++ {
@@ -65,7 +63,6 @@ const (
 	Detailed                // expanded output with body / breakdown
 )
 
-// String returns the human-readable mode name used in prompts and cache keys.
 func (m CmdMode) String() string {
 	switch m {
 	case Detailed:

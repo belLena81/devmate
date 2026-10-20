@@ -14,8 +14,6 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		// Config errors are fatal: a bad config file should not silently fall
-		// back to defaults, as the user clearly intended a different value.
 		slog.New(slog.NewTextHandler(os.Stderr, nil)).
 			Error("failed to load config", "error", err)
 		os.Exit(1)

@@ -17,7 +17,6 @@ func noopLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// newTestRepo creates a real temporary git repository and returns its path.
 func newTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -38,8 +37,7 @@ func newTestRepo(t *testing.T) string {
 	return dir
 }
 
-// defaultBranch returns the branch name git init created (main, master, etc.)
-// Must be called after at least one commit exists.
+// defaultBranch must be called after at least one commit exists.
 func defaultBranch(t *testing.T, dir string) string {
 	t.Helper()
 	out, err := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
@@ -49,7 +47,6 @@ func defaultBranch(t *testing.T, dir string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// stageFile writes content to a file inside the repo and stages it.
 func stageFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -63,7 +60,6 @@ func stageFile(t *testing.T, dir, name, content string) {
 	}
 }
 
-// commitAll commits everything currently staged.
 func commitAll(t *testing.T, dir, message string) {
 	t.Helper()
 	cmd := exec.Command("git", "commit", "-m", message)
@@ -73,7 +69,6 @@ func commitAll(t *testing.T, dir, message string) {
 	}
 }
 
-// checkoutBranch creates and switches to a new branch.
 func checkoutBranch(t *testing.T, dir, name string) {
 	t.Helper()
 	cmd := exec.Command("git", "checkout", "-b", name)
@@ -83,7 +78,6 @@ func checkoutBranch(t *testing.T, dir, name string) {
 	}
 }
 
-// mergeBranch merges the given branch into the current branch.
 func mergeBranch(t *testing.T, dir, branch string) {
 	t.Helper()
 	cmd := exec.Command("git", "merge", branch, "--no-edit")
@@ -132,9 +126,6 @@ func TestDiffCached_ErrorOutsideGitRepo(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when run outside a git repo")
 	}
-	// DiffCached wraps the underlying git error; ErrNotGitRepository is not
-	// propagated because the runner is already constructed with a bad dir.
-	// We only assert that an error occurred, not its type.
 }
 
 // --- LogBetween --------------------------------------------------------------
@@ -162,7 +153,6 @@ func TestLogBetween_ReturnsOnlyFeatureBranchCommits(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("expected 3 commit messages, got %d: %v", len(msgs), msgs)
 	}
-	// --reverse means oldest first
 	expected := []string{"commit 1", "commit 2", "commit 3"}
 	for i, want := range expected {
 		if msgs[i] != want {
@@ -178,7 +168,6 @@ func TestLogBetween_ExcludesMergeCommits(t *testing.T) {
 	commitAll(t, dir, "initial commit")
 	base := defaultBranch(t, dir)
 
-	// add a commit on base that will be merged back into feature
 	stageFile(t, dir, "base_update.go", "// base update\n")
 	commitAll(t, dir, "commit 4")
 
@@ -188,7 +177,6 @@ func TestLogBetween_ExcludesMergeCommits(t *testing.T) {
 	stageFile(t, dir, "b.go", "// b\n")
 	commitAll(t, dir, "commit 2")
 
-	// merge base back into feature (simulating keeping feature up to date)
 	mergeBranch(t, dir, base)
 
 	stageFile(t, dir, "c.go", "// c\n")
@@ -219,7 +207,6 @@ func TestLogBetween_EmptyWhenNoUniqueCommits(t *testing.T) {
 	commitAll(t, dir, "initial commit")
 	base := defaultBranch(t, dir)
 
-	// feature branch with no additional commits
 	checkoutBranch(t, dir, "feature/empty")
 
 	runner := git.New(dir, noopLogger())
@@ -253,17 +240,12 @@ func TestLogBetween_ErrorOutsideGitRepo(t *testing.T) {
 }
 
 func TestDiffCached_WhitespaceOnlyChanges_ExcludedFromDiff(t *testing.T) {
-	// Stage a file, commit it, then re-stage the same content with only
-	// indentation changes. DiffCached must return empty because -w ignores
-	// all whitespace differences.
 	dir := newTestRepo(t)
 
-	// Commit the original file.
 	original := "package main\n\nfunc hello() {\n\treturn\n}\n"
 	stageFile(t, dir, "hello.go", original)
 	commitAll(t, dir, "initial")
 
-	// Re-write with spaces instead of tabs — whitespace-only change.
 	whitespaceOnly := "package main\n\nfunc hello() {\n    return\n}\n"
 	stageFile(t, dir, "hello.go", whitespaceOnly)
 
@@ -318,7 +300,6 @@ func TestLogBetween_ErrorOnEmptyRef(t *testing.T) {
 // --- GIT_DIR isolation -------------------------------------------------------
 
 func TestRunner_IsolatesGitEnv(t *testing.T) {
-	// Create two separate repos.
 	repoA := newTestRepo(t)
 	stageFile(t, repoA, "main.go", "package main\n")
 	commitAll(t, repoA, "commit in repo A")
@@ -332,10 +313,8 @@ func TestRunner_IsolatesGitEnv(t *testing.T) {
 	stageFile(t, repoB, "main.go", "package main\n")
 	commitAll(t, repoB, "commit in repo B")
 
-	// Leak repoB's GIT_DIR into the environment — simulating an IDE runner.
 	t.Setenv("GIT_DIR", repoB+"/.git")
 
-	// Runner for repoA must still see repoA's commits, not repoB's.
 	runner := git.New(repoA, noopLogger())
 	msgs, err := runner.LogBetween(branchA, "feature/a")
 	if err != nil {

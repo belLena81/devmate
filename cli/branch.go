@@ -34,7 +34,6 @@ func newBranchCmd(a *App) *cobra.Command {
 			return err
 		}
 		if a.branchService == nil {
-			// real construction — wired once you have infra ready
 			return domain.ErrServiceNotInitialized
 		}
 		msg, err := a.branchService.DraftBranchName(cmd.Context(), branchOpts)
@@ -112,7 +111,6 @@ Note:
 		"bypass the response cache and always call the LLM",
 	)
 
-	// Make short and detailed mutually exclusive
 	branchCmd.MarkFlagsMutuallyExclusive("short", "detailed")
 
 	return branchCmd

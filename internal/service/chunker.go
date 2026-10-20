@@ -7,16 +7,12 @@ import (
 )
 
 // Chunk is one piece of a diff together with the file names it covers.
-// File names are used only for logging — the content is what matters to the LLM.
 type Chunk struct {
 	Content string
 	Files   []string
 }
 
-// ChunkDiff splits a unified diff into chunks whose size does not exceed
-// maxSize bytes. It splits on file boundaries ("diff --git …") wherever
-// possible; if a single file's diff exceeds maxSize it falls back to a hard
-// byte split.
+// ChunkDiff splits a unified diff into chunks of at most maxSize bytes, on file boundaries where possible.
 func ChunkDiff(diff string, maxSize int) []string {
 	fileDiffs := splitOnFileBoundary(diff)
 
@@ -44,8 +40,6 @@ func ChunkDiff(diff string, maxSize int) []string {
 	return chunks
 }
 
-// splitOnFileBoundary splits a unified diff into per-file sections. Each
-// section starts with its own "diff --git …" header line.
 func splitOnFileBoundary(diff string) []string {
 	var files []string
 	var current strings.Builder
@@ -63,8 +57,6 @@ func splitOnFileBoundary(diff string) []string {
 	return files
 }
 
-// extractFileName pulls the file path from the first line of a file diff.
-// "diff --git a/foo.go b/foo.go" → "foo.go"
 func extractFileName(fileDiff string) string {
 	for _, line := range strings.SplitN(fileDiff, "\n", 2) {
 		if strings.HasPrefix(line, "diff --git") {
@@ -77,8 +69,6 @@ func extractFileName(fileDiff string) string {
 	return "unknown"
 }
 
-// hardSplit breaks a string into parts of at most maxSize bytes regardless of
-// content. Used as a last resort when a single file diff exceeds the limit.
 func hardSplit(content string, maxSize int) []string {
 	if maxSize <= 0 {
 		return []string{content}
@@ -94,19 +84,7 @@ func hardSplit(content string, maxSize int) []string {
 	return parts
 }
 
-// PackChunks splits a unified diff into Chunks that fit within maxSize bytes,
-// packing multiple small files together to minimise LLM round-trips while
-// keeping large files in their own chunks.
-//
-// Algorithm:
-//  1. Split the diff on file boundaries into individual file diffs.
-//  2. Sort file diffs by size descending so the largest files are placed first.
-//     This front-loads the expensive solo chunks and lets small files fill the
-//     tail slots compactly.
-//  3. Greedy bin-pack: accumulate files into the current chunk until the next
-//     file would push it over maxSize, then flush and start a new chunk.
-//  4. Files that alone exceed maxSize are hard-split into byte-level parts,
-//     each part becoming its own Chunk.
+// PackChunks bin-packs a unified diff into Chunks of at most maxSize bytes, largest files first.
 func PackChunks(diff string, maxSize int) []Chunk {
 	if strings.TrimSpace(diff) == "" {
 		return nil
@@ -117,7 +95,6 @@ func PackChunks(diff string, maxSize int) []Chunk {
 		return []Chunk{{Content: diff, Files: []string{"unknown"}}}
 	}
 
-	// Step 1: parse each file diff into a named record.
 	type namedDiff struct {
 		name    string
 		content string
@@ -130,12 +107,10 @@ func PackChunks(diff string, maxSize int) []Chunk {
 		})
 	}
 
-	// Step 2: sort descending by size so large files come first.
 	sort.Slice(items, func(i, j int) bool {
 		return len(items[i].content) > len(items[j].content)
 	})
 
-	// Step 3 & 4: greedy bin-pack with hard-split fallback.
 	var chunks []Chunk
 	var currentContent strings.Builder
 	var currentFiles []string
@@ -153,8 +128,6 @@ func PackChunks(diff string, maxSize int) []Chunk {
 
 	for _, item := range items {
 		if len(item.content) > maxSize {
-			// File is larger than the limit even alone — flush pending work
-			// and hard-split this file into byte-level parts.
 			flush()
 			for i, part := range hardSplit(item.content, maxSize) {
 				chunks = append(chunks, Chunk{
@@ -165,8 +138,6 @@ func PackChunks(diff string, maxSize int) []Chunk {
 			continue
 		}
 
-		// File fits within the limit — check whether it still fits alongside
-		// whatever is already in the current accumulator.
 		if currentContent.Len()+len(item.content) > maxSize {
 			flush()
 		}

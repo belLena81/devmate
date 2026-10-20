@@ -44,8 +44,6 @@ func (f *fakeLLM) Generate(_ context.Context, prompt string) (string, error) {
 	return f.response, f.err
 }
 
-// fakeProgress records all Status and Done calls for test assertions.
-// Thread-safe: goroutines in summarizeChunksParallel call Status concurrently.
 type fakeProgress struct {
 	mu       sync.Mutex
 	statuses []string
@@ -369,7 +367,6 @@ func TestDraftMessage_LLMError_StillCallsDone(t *testing.T) {
 }
 
 func TestDraftMessage_NilProgress_DoesNotPanic(t *testing.T) {
-	// Progress is nil — the progress() accessor should return NoopProgress.
 	svc := Service{
 		git: &fakeGit{diff: "diff"},
 		llm: &fakeLLM{response: "msg"},
@@ -428,7 +425,6 @@ func TestNew_WithChunkThreshold(t *testing.T) {
 	}
 }
 
-// WithChunkThreshold(0) must be a no-op — zero is not a valid threshold.
 func TestNew_WithChunkThreshold_ZeroIgnored(t *testing.T) {
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithChunkThreshold(0))
 	if svc.ChunkThreshold() != config.DefaultServiceChunkThreshold {
@@ -450,11 +446,17 @@ func TestNew_WithMaxRetries(t *testing.T) {
 	}
 }
 
-// WithMaxRetries(0) is a valid value (no retries) and must be applied.
 func TestNew_WithMaxRetries_ZeroIsValid(t *testing.T) {
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithMaxRetries(5), WithMaxRetries(0))
 	if svc.MaxRetries() != 0 {
 		t.Errorf("WithMaxRetries(0): got %d, want 0", svc.MaxRetries())
+	}
+}
+
+func TestNew_WithMaxRetries_NegativeClampsToZero(t *testing.T) {
+	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(), WithMaxRetries(-1))
+	if svc.MaxRetries() != 0 {
+		t.Errorf("WithMaxRetries(-1): got %d, want 0", svc.MaxRetries())
 	}
 }
 
@@ -465,7 +467,6 @@ func TestNew_WithRetryBaseDelay(t *testing.T) {
 	}
 }
 
-// Multiple options applied in order — last write wins on the same field.
 func TestNew_MultipleOptions_AppliedInOrder(t *testing.T) {
 	svc := New(nil, &fakeLLM{}, NoopCache{}, "model", noopLogger(),
 		WithChunkThreshold(1000),

@@ -1,9 +1,5 @@
 package cli_test
 
-// app_test.go uses the external test package (cli_test) so it can only access
-// exported identifiers — the same surface a real caller (main.go) would use.
-// This keeps the tests honest about the public API of the App.
-
 import (
 	"bytes"
 	"context"
@@ -29,7 +25,6 @@ type stubLLM struct {
 
 func (s *stubLLM) Generate(_ context.Context, _ string) (string, error) { return s.response, s.err }
 
-// spyCommitService captures the options passed to DraftMessage.
 type spyCommitService struct {
 	receivedOpts service.CommitOptions
 	response     string
@@ -41,7 +36,6 @@ func (s *spyCommitService) DraftMessage(_ context.Context, o service.CommitOptio
 	return s.response, s.err
 }
 
-// spyBranchService captures the options passed to DraftBranchName.
 type spyBranchService struct {
 	receivedOpts service.BranchOptions
 	response     string
@@ -53,7 +47,6 @@ func (s *spyBranchService) DraftBranchName(_ context.Context, o service.BranchOp
 	return s.response, s.err
 }
 
-// spyPrService captures the options passed to DraftPrDescription.
 type spyPrService struct {
 	receivedOpts service.PrOptions
 	response     string
@@ -78,9 +71,6 @@ func noopLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// TestNewAppWithService_DoesNotMutateService asserts that NewAppWithService
-// does not modify any field of the Service it receives. The caller (main.go)
-// retains full ownership of the service after construction.
 func TestNewAppWithService_DoesNotMutateService(t *testing.T) {
 	svc := service.New(nil, &stubLLM{}, service.NoopCache{}, config.DefaultOllamaModel, noopLogger(), service.WithChunkThreshold(0))
 
@@ -89,7 +79,6 @@ func TestNewAppWithService_DoesNotMutateService(t *testing.T) {
 		t.Fatalf("NewAppWithService: %v", err)
 	}
 
-	// The constructor must never assign a new GitClient to the caller's service.
 	if svc.Git() != nil {
 		t.Error("NewAppWithService must not mutate svc.Git (unexpected side-effect)")
 	}
@@ -151,9 +140,6 @@ func TestApp_CacheStatCmd_IsRegistered(t *testing.T) {
 	}
 }
 
-// TestNewAppWithService_CacheService_DerivedFromServiceCache asserts that
-// NewAppWithService automatically derives the cacheService from svc.Cache so
-// callers do not need to wire it manually.
 func TestNewAppWithService_CacheService_DerivedFromServiceCache(t *testing.T) {
 	svc := service.New(nil, &stubLLM{}, service.NoopCache{}, config.DefaultOllamaModel, noopLogger(), service.WithChunkThreshold(0))
 	app, err := cli.NewAppWithService(svc)
@@ -161,7 +147,6 @@ func TestNewAppWithService_CacheService_DerivedFromServiceCache(t *testing.T) {
 		t.Fatalf("NewAppWithService: %v", err)
 	}
 
-	// cache stat should work (returning empty list) without any additional wiring.
 	var buf bytes.Buffer
 	app.RootCmd().SetOut(&buf)
 	app.RootCmd().SetArgs([]string{"cache", "stat"})

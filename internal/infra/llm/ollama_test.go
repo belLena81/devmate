@@ -12,15 +12,12 @@ import (
 	"devmate/internal/infra/llm"
 )
 
-// newTestClient creates an OllamaClient pointed at the given test server URL.
-// Model is fixed to "test-model" for all unit tests.
 func newTestClient(serverURL string) *llm.OllamaClient {
 	return llm.NewOllamaClient(serverURL, "/api/generate", 5*time.Second, 10<<20,
 		llm.WithModel("test-model"),
 	)
 }
 
-// ollamaResponse builds a minimal valid Ollama /api/generate response body.
 func ollamaResponse(response string) string {
 	b, _ := json.Marshal(map[string]any{
 		"model":    "test-model",
@@ -252,20 +249,12 @@ func TestGenerate_EmptyResponseField_ReturnsEmptyString(t *testing.T) {
 }
 
 func TestGenerate_OversizedResponse_ReturnsError(t *testing.T) {
-	// Serve a response body larger than maxResponseBytes to verify the
-	// LimitReader prevents unbounded reads. The JSON decoder will see a
-	// truncated payload and return an error — which is the correct outcome.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		// Write a valid-looking JSON prefix followed by 11 MiB of junk so the
-		// body clearly exceeds the 10 MiB cap. The LimitReader cuts it off mid-
-		// stream, causing json.Decoder to return an EOF / syntax error.
 		w.Write([]byte(`{"response":"`))
 		junk := strings.Repeat("x", 11<<20)
 		w.Write([]byte(junk))
-		// Note: deliberately no closing `"}` — the body is intentionally bad
-		// past the limit to confirm truncation behaviour.
 	}))
 	defer srv.Close()
 

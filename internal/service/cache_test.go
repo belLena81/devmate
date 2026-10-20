@@ -79,7 +79,6 @@ func TestDiskCache_PersistsAcrossInstances(t *testing.T) {
 	dir := t.TempDir()
 	NewDiskCache(dir).Set("key", "hello")
 
-	// Second instance at the same dir — simulates next process run.
 	val, ok := NewDiskCache(dir).Get("key")
 	if !ok {
 		t.Fatal("expected hit from second instance")
@@ -141,8 +140,6 @@ func TestDiskCache_NullByte_SetReturnsError(t *testing.T) {
 }
 
 func TestDiskCache_ValidHexKey_RoundTrips(t *testing.T) {
-	// SHA-256 hex keys — the real-world format produced by buildCacheKey —
-	// must be accepted without error.
 	hexKey := "a3f1c9e2b7d084561f2a3c4e5d6b7890abcdef1234567890abcdef1234567890"
 	c := newTestCache(t)
 	if err := c.Set(hexKey, "value"); err != nil {
@@ -173,7 +170,6 @@ func TestDiskCache_Stat_EmptyCache_ReturnsEmptySlice(t *testing.T) {
 }
 
 func TestDiskCache_Stat_NonExistentDir_ReturnsEmptySlice(t *testing.T) {
-	// Cache dir that was never written to — Stat must not error.
 	c := NewDiskCache(filepath.Join(t.TempDir(), "does-not-exist"))
 	entries, err := c.Stat()
 	if err != nil {
@@ -252,7 +248,6 @@ func TestDiskCache_Stat_SortedNewestFirst(t *testing.T) {
 	now := time.Now()
 	for i, key := range []string{"oldest", "middle", "newest"} {
 		c.Set(key, "v")
-		// Touch the file with an explicit mod-time so the sort is deterministic.
 		path := filepath.Join(dir, key)
 		mt := now.Add(time.Duration(i) * time.Second)
 		os.Chtimes(path, mt, mt)

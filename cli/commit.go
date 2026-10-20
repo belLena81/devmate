@@ -107,7 +107,6 @@ Note:
 		"bypass the response cache and always call the LLM",
 	)
 
-	// Make short and detailed mutually exclusive
 	commitCmd.MarkFlagsMutuallyExclusive("short", "detailed")
 	return commitCmd
 }

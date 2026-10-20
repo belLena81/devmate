@@ -13,7 +13,6 @@ func TestSpinner_StatusAndDone_WritesToWriter(t *testing.T) {
 	s := progress.NewWriter(&buf)
 
 	s.Status("loading...")
-	// Give the loop a moment to write at least one frame.
 	time.Sleep(200 * time.Millisecond)
 	s.Done("")
 
@@ -32,7 +31,6 @@ func TestSpinner_Done_ClearsLine(t *testing.T) {
 	s.Done("")
 
 	out := buf.String()
-	// \033[K is the ANSI "erase to end of line" escape used to clear.
 	if !strings.Contains(out, "\033[K") {
 		t.Error("expected ANSI clear sequence in output")
 	}
@@ -75,7 +73,6 @@ func TestSpinner_Done_WithoutStatus_DoesNotPanic(t *testing.T) {
 	var buf bytes.Buffer
 	s := progress.NewWriter(&buf)
 
-	// Calling Done without ever calling Status should not panic.
 	s.Done("final")
 
 	if !strings.Contains(buf.String(), "final") {
@@ -90,5 +87,5 @@ func TestSpinner_MultipleDone_DoesNotPanic(t *testing.T) {
 	s.Status("work")
 	time.Sleep(100 * time.Millisecond)
 	s.Done("")
-	s.Done("") // second Done should not panic or hang
+	s.Done("")
 }

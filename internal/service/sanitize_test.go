@@ -19,7 +19,6 @@ func TestSanitize_CollapsesMultipleBlankLines(t *testing.T) {
 }
 
 func TestSanitize_CollapsesBlanksWithSpaces(t *testing.T) {
-	// LLM sometimes emits " \n \n" — lines containing only spaces.
 	got := sanitize("feat: title\n \n \nbody")
 	want := "feat: title\n\nbody"
 	if got != want {
@@ -111,7 +110,6 @@ func TestExtractBranchName_MultiWordPreamble_BranchFound(t *testing.T) {
 }
 
 func TestExtractBranchName_NoBranchFound_FallsBackToSanitized(t *testing.T) {
-	// If no line matches type/slug, return sanitized content rather than empty.
 	input := "I cannot determine the branch name from this task."
 	got := extractBranchName(input)
 	if got == "" {

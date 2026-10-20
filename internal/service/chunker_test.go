@@ -15,8 +15,6 @@ func TestChunkDiff_SplitsOnFileBoundary(t *testing.T) {
 	fileBar := "diff --git a/bar.go b/bar.go\n+change2\n"
 	diff := fileFoo + fileBar
 
-	// set limit smaller than combined but larger than each file
-	// forces them into separate chunks
 	chunks := ChunkDiff(diff, len(fileFoo)+1)
 
 	if len(chunks) != 2 {
@@ -31,7 +29,6 @@ func TestChunkDiff_SplitsOnFileBoundary(t *testing.T) {
 }
 
 func TestChunkDiff_RespectsMaxSize(t *testing.T) {
-	// build a diff larger than the limit
 	var b strings.Builder
 	for i := 0; i < 50; i++ {
 		b.WriteString(fmt.Sprintf("diff --git a/file%d.go b/file%d.go\n", i, i))
@@ -41,7 +38,7 @@ func TestChunkDiff_RespectsMaxSize(t *testing.T) {
 	chunks := ChunkDiff(b.String(), 200)
 
 	for i, chunk := range chunks {
-		if len(chunk) > 300 { // some tolerance for boundary splits
+		if len(chunk) > 300 {
 			t.Errorf("chunk %d exceeds max size: %d", i, len(chunk))
 		}
 	}
@@ -76,7 +73,6 @@ func TestDraftMessage_LargeDiff_UsesMapReduce(t *testing.T) {
 	var b strings.Builder
 	for i := 0; i < 20; i++ {
 		b.WriteString(fmt.Sprintf("diff --git a/file%d.go b/file%d.go\n", i, i))
-		// pad each file diff to ensure total exceeds threshold
 		b.WriteString("+" + strings.Repeat("x", 200) + "\n")
 	}
 
@@ -106,7 +102,6 @@ func TestBuildChunkPrompt_ResponseIsCleanBullets(t *testing.T) {
 }
 
 func TestBuildSynthesisPrompt_ReceivesCleanInput(t *testing.T) {
-	// synthesis prompt should present summaries as numbered list
 	summaries := []string{"- added login flag", "- updated root cmd"}
 	prompt := BuildSynthesisPrompt(summaries, domain.Undefined, domain.Short, false)
 
@@ -118,7 +113,6 @@ func TestBuildSynthesisPrompt_ReceivesCleanInput(t *testing.T) {
 // ─── PackChunks ───────────────────────────────────────────────────────────────
 
 func TestPackChunks_SmallFilesPacked(t *testing.T) {
-	// Three tiny files that individually fit easily — all should land in one chunk.
 	var b strings.Builder
 	for i := 0; i < 3; i++ {
 		b.WriteString(fmt.Sprintf("diff --git a/tiny%d.go b/tiny%d.go\n+x\n", i, i))
@@ -133,9 +127,6 @@ func TestPackChunks_SmallFilesPacked(t *testing.T) {
 }
 
 func TestPackChunks_LargeFileGetsOwnChunk(t *testing.T) {
-	// big.go is 490 bytes — it consumes 98% of the 500-byte threshold.
-	// small.go is ~30 bytes. Together they exceed 500, so the packer must
-	// flush big.go first and put small.go in a separate chunk.
 	bigContent := "diff --git a/big.go b/big.go\n+" + strings.Repeat("x", 490) + "\n"
 	smallContent := "diff --git a/small.go b/small.go\n+y\n"
 	diff := bigContent + smallContent
@@ -145,7 +136,6 @@ func TestPackChunks_LargeFileGetsOwnChunk(t *testing.T) {
 	if len(chunks) < 2 {
 		t.Fatalf("expected at least 2 chunks, got %d", len(chunks))
 	}
-	// big.go should not share a chunk with small.go
 	for _, chunk := range chunks {
 		if len(chunk.Files) > 1 {
 			for _, f := range chunk.Files {
@@ -158,7 +148,6 @@ func TestPackChunks_LargeFileGetsOwnChunk(t *testing.T) {
 }
 
 func TestPackChunks_OversizedFileSplitIntoParts(t *testing.T) {
-	// A file that alone exceeds maxSize must be hard-split into numbered parts.
 	big := "diff --git a/huge.go b/huge.go\n+" + strings.Repeat("z", 1200) + "\n"
 	chunks := PackChunks(big, 500)
 
@@ -166,7 +155,7 @@ func TestPackChunks_OversizedFileSplitIntoParts(t *testing.T) {
 		t.Fatalf("expected multiple parts for oversized file, got %d chunk(s)", len(chunks))
 	}
 	for _, chunk := range chunks {
-		if len(chunk.Content) > 600 { // 500 + small tolerance
+		if len(chunk.Content) > 600 {
 			t.Errorf("chunk exceeds maxSize: %d bytes, files: %v", len(chunk.Content), chunk.Files)
 		}
 		for _, f := range chunk.Files {
@@ -181,8 +170,6 @@ func TestPackChunks_OversizedFileSplitIntoParts(t *testing.T) {
 }
 
 func TestPackChunks_MixedSizes_PackedEfficiently(t *testing.T) {
-	// 1 large file (450 bytes of content) + 4 small files (30 bytes each).
-	// threshold = 500. Large file must be alone; small files should all pack together.
 	var b strings.Builder
 	b.WriteString("diff --git a/large.go b/large.go\n+" + strings.Repeat("L", 450) + "\n")
 	for i := 0; i < 4; i++ {
@@ -191,7 +178,6 @@ func TestPackChunks_MixedSizes_PackedEfficiently(t *testing.T) {
 
 	chunks := PackChunks(b.String(), 500)
 
-	// We expect exactly 2 chunks: one for large.go (alone) and one for all small files.
 	if len(chunks) != 2 {
 		t.Errorf("expected 2 chunks for mixed sizes, got %d", len(chunks))
 		for i, c := range chunks {
@@ -201,16 +187,12 @@ func TestPackChunks_MixedSizes_PackedEfficiently(t *testing.T) {
 }
 
 func TestPackChunks_SortedLargestFirst(t *testing.T) {
-	// large.go is listed last in the diff but should end up first in chunks
-	// because PackChunks sorts by descending size before packing.
 	small := "diff --git a/small.go b/small.go\n+s\n"
 	large := "diff --git a/large.go b/large.go\n+" + strings.Repeat("L", 400) + "\n"
-	diff := small + large // small appears first in the raw diff
+	diff := small + large
 
 	chunks := PackChunks(diff, 500)
 
-	// large.go must be in its own chunk and that chunk must come first
-	// (because we sort descending and large.go exceeds half the threshold)
 	if len(chunks) == 0 {
 		t.Fatal("expected at least one chunk")
 	}
@@ -227,7 +209,6 @@ func TestPackChunks_SortedLargestFirst(t *testing.T) {
 }
 
 func TestPackChunks_AllFilesPresent(t *testing.T) {
-	// Regardless of packing, every file must appear in exactly one chunk.
 	fileNames := []string{"alpha.go", "beta.go", "gamma.go", "delta.go", "epsilon.go"}
 	var b strings.Builder
 	for i, name := range fileNames {
@@ -236,13 +217,9 @@ func TestPackChunks_AllFilesPresent(t *testing.T) {
 
 	chunks := PackChunks(b.String(), 400)
 
-	// Track which original files have been seen. Parts of the same file
-	// (e.g. "epsilon.go (part 1)") share the same base name, so we strip
-	// the " (part N)" suffix before recording.
 	seen := make(map[string]bool)
 	for _, chunk := range chunks {
 		for _, f := range chunk.Files {
-			// Strip optional " (part N)" suffix to get the base file name.
 			base := f
 			if idx := strings.Index(f, " (part "); idx != -1 {
 				base = f[:idx]

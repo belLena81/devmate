@@ -29,10 +29,6 @@ var reduceTmpl string
 //go:embed _resources/pr_synthesis.tmpl
 var prSynthesisTmpl string
 
-// Parsed templates — compiled exactly once at package init from the embedded
-// strings above. Parsing on every mustRender call re-compiled seven templates
-// per LLM invocation with zero benefit; moving it here makes the cost pay-once
-// and surfaces any template syntax errors at startup rather than mid-request.
 var (
 	commitT      = template.Must(template.New("commit").Parse(commitTmpl))
 	branchT      = template.Must(template.New("branch").Parse(branchTmpl))
@@ -43,15 +39,13 @@ var (
 	prSynthesisT = template.Must(template.New("pr_synthesis").Parse(prSynthesisTmpl))
 )
 
-// commitData holds the values injected into commit.tmpl.
 type commitData struct {
-	TypeOverride string // empty when type is auto-detected
+	TypeOverride string
 	Detailed     bool
 	Explain      bool
 	Diff         string
 }
 
-// branchData holds the values injected into branch.tmpl.
 type branchData struct {
 	TypeOverride string
 	Detailed     bool
@@ -59,7 +53,6 @@ type branchData struct {
 	Task         string
 }
 
-// prData holds the values injected into pr.tmpl.
 type prData struct {
 	TypeOverride      string
 	Detailed          bool
@@ -69,21 +62,17 @@ type prData struct {
 	Commits           []string
 }
 
-// chunkData holds the values injected into chunk.tmpl.
 type chunkData struct {
 	Chunk int
 	Total int
 	Diff  string
 }
 
-// numberedSummary is one entry in the synthesis summaries list.
-// Carrying the number as a field avoids needing a custom template func.
 type numberedSummary struct {
 	N    int
 	Text string
 }
 
-// synthesisData holds the values injected into synthesis.tmpl.
 type synthesisData struct {
 	TypeOverride string
 	Detailed     bool
@@ -123,8 +112,7 @@ func BuildPrPrompt(commits []string, o PrOptions) string {
 	})
 }
 
-// BuildChunkPrompt builds the map-step prompt for summarising one chunk of a
-// large diff. chunk and total tell the model it is seeing a partial view.
+// BuildChunkPrompt builds the map-step prompt for one chunk of a large diff.
 func BuildChunkPrompt(diff string, chunk, total int) string {
 	return mustRender(chunkT, chunkData{
 		Chunk: chunk,
@@ -133,8 +121,7 @@ func BuildChunkPrompt(diff string, chunk, total int) string {
 	})
 }
 
-// BuildSynthesisPrompt builds the reduce-step prompt that turns per-chunk
-// bullet summaries into a single conventional commit message.
+// BuildSynthesisPrompt builds the prompt that turns chunk summaries into a single commit message.
 func BuildSynthesisPrompt(summaries []string, cmdType domain.CmdType, mode domain.CmdMode, explain bool) string {
 	typeStr, _ := cmdType.String()
 
@@ -151,9 +138,7 @@ func BuildSynthesisPrompt(summaries []string, cmdType domain.CmdType, mode domai
 	})
 }
 
-// BuildReducePrompt builds a prompt that condenses a group of intermediate
-// summaries into a single shorter summary. Used when the collected chunk
-// summaries are too large to fit into a single synthesis prompt.
+// BuildReducePrompt builds the prompt that condenses a group of summaries into one shorter summary.
 func BuildReducePrompt(summaries []string) string {
 	numbered := make([]numberedSummary, len(summaries))
 	for i, s := range summaries {
@@ -165,7 +150,6 @@ func BuildReducePrompt(summaries []string) string {
 	})
 }
 
-// prSynthesisData holds the values injected into pr_synthesis.tmpl.
 type prSynthesisData struct {
 	TypeOverride      string
 	Detailed          bool
@@ -175,8 +159,7 @@ type prSynthesisData struct {
 	Summaries         []numberedSummary
 }
 
-// BuildPrSynthesisPrompt builds the reduce-step prompt that turns per-chunk
-// commit summaries into a single PR title and description.
+// BuildPrSynthesisPrompt builds the prompt that turns chunk summaries into a single PR description.
 func BuildPrSynthesisPrompt(summaries []string, o PrOptions) string {
 	typeStr, _ := o.Type.String()
 
@@ -195,9 +178,6 @@ func BuildPrSynthesisPrompt(summaries []string, o PrOptions) string {
 	})
 }
 
-// mustRender executes a pre-parsed template and returns the result as a string.
-// Panics on execution error — this indicates a data/template contract violation,
-// which is a programmer error, not a runtime condition.
 func mustRender(t *template.Template, data any) string {
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, data); err != nil {

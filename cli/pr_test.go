@@ -6,18 +6,14 @@ import (
 	"testing"
 )
 
-// newPrApp returns a minimal App suitable for pr command tests.
 func newPrApp() *App {
 	app := &App{commitService: &fakeCommitService{}, branchService: &fakeBranchService{}, prService: &fakePrService{}}
 	app.rootCmd = buildRootCmd(app)
 	return app
 }
 
-// TestPrCmd_NilService_ReturnsErrServiceNotInitialized guards against a
-// nil-pointer panic when prService has not been wired in yet. This mirrors
-// the equivalent check in branch.go and (now) commit.go.
 func TestPrCmd_NilService_ReturnsErrServiceNotInitialized(t *testing.T) {
-	app := &App{} // all services nil
+	app := &App{}
 	app.rootCmd = buildRootCmd(app)
 	app.rootCmd.SetArgs([]string{"pr", "feature/x", "main"})
 

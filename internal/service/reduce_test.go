@@ -43,7 +43,6 @@ func TestGroupSummaries_OversizedSingleSummaryGetsOwnGroup(t *testing.T) {
 
 	groups := groupSummaries([]string{small, huge}, 500)
 
-	// Expect: [["small"], ["xxx..."]]
 	if len(groups) != 2 {
 		t.Fatalf("expected 2 groups, got %d", len(groups))
 	}
@@ -114,7 +113,6 @@ func TestReduceSummaries_LargeSummaries_ReducedViaLLM(t *testing.T) {
 		log:            noopLogger(),
 	}
 
-	// 5 summaries of 100 bytes each = 500 bytes, well above 200 threshold
 	summaries := make([]string, 5)
 	for i := range summaries {
 		summaries[i] = fmt.Sprintf("- change %s", strings.Repeat("x", 90))
@@ -141,9 +139,6 @@ func TestReduceSummaries_LLMError_Propagated(t *testing.T) {
 		log:            noopLogger(),
 	}
 
-	// Each summary is 40 bytes — two fit within the 100-byte threshold as one
-	// group, so groupSummaries produces a multi-item group that triggers an
-	// LLM call (and therefore the error).
 	summaries := []string{
 		strings.Repeat("a", 40),
 		strings.Repeat("b", 40),
@@ -159,7 +154,7 @@ func TestReduceSummaries_LLMError_Propagated(t *testing.T) {
 func TestReduceSummaries_SingleSummary_PassedThrough(t *testing.T) {
 	svc := Service{
 		llm:            &fakeLLM{response: "should not be called"},
-		chunkThreshold: 10, // threshold smaller than the summary
+		chunkThreshold: 10,
 		log:            noopLogger(),
 	}
 
@@ -258,37 +253,29 @@ func TestMapReduce_ChunksProcessedInParallel(t *testing.T) {
 		barrier     = make(chan struct{})
 	)
 
-	// Every goroutine increments inFlight, records peak, then waits on the
-	// barrier. The test closes the barrier once peak >= 2, unblocking all.
 	slow := &fakeLLM{
 		onGenerate: func(string) {
 			cur := inFlight.Add(1)
 			defer inFlight.Add(-1)
-			// Record peak concurrency.
 			for {
 				old := maxInFlight.Load()
 				if cur <= old || maxInFlight.CompareAndSwap(old, cur) {
 					break
 				}
 			}
-			// Wait for the barrier — released once we know parallelism is proven.
 			<-barrier
 		},
 		response: "- summary bullet",
 	}
 
-	// Close the barrier once at least 2 goroutines are in-flight, or after a
-	// generous timeout so the test doesn't hang forever on failure.
 	go func() {
 		for i := 0; i < 2000; i++ {
 			if maxInFlight.Load() >= 2 {
 				close(barrier)
 				return
 			}
-			// yield to let goroutines schedule
 			testing_sleep(t)
 		}
-		// Timeout path: close anyway so goroutines unblock and test can fail.
 		close(barrier)
 	}()
 
@@ -296,7 +283,7 @@ func TestMapReduce_ChunksProcessedInParallel(t *testing.T) {
 		git:            &fakeGit{diff: diff.String()},
 		llm:            slow,
 		chunkThreshold: 500,
-		maxConcurrency: 6, // allow all chunks to run at once for this test
+		maxConcurrency: 6,
 		log:            noopLogger(),
 	}
 
@@ -311,7 +298,6 @@ func TestMapReduce_ChunksProcessedInParallel(t *testing.T) {
 }
 
 func TestMapReduce_ConcurrencyLimiterCapsInFlight(t *testing.T) {
-	// With MaxConcurrency=2 and 6 chunks, peak in-flight must never exceed 2.
 	var diff strings.Builder
 	for i := 0; i < 6; i++ {
 		diff.WriteString(fmt.Sprintf("diff --git a/file%d.go b/file%d.go\n", i, i))
@@ -339,7 +325,6 @@ func TestMapReduce_ConcurrencyLimiterCapsInFlight(t *testing.T) {
 		response: "- summary bullet",
 	}
 
-	// Let exactly 2 goroutines in, verify peak, then unblock them all.
 	go func() {
 		for i := 0; i < 2000; i++ {
 			if maxInFlight.Load() >= 2 {
@@ -371,17 +356,13 @@ func TestMapReduce_ConcurrencyLimiterCapsInFlight(t *testing.T) {
 	}
 }
 
-// testing_sleep yields the current goroutine briefly so that other goroutines
-// can be scheduled. Uses runtime.Gosched via a time.Sleep(0) equivalent.
 func testing_sleep(_ *testing.T) {
-	// A tiny sleep is more reliable than runtime.Gosched across platforms.
 	var ch = make(chan struct{})
 	go func() { close(ch) }()
 	<-ch
 }
 
 func TestMapReduce_PreservesChunkOrder(t *testing.T) {
-	// Each chunk gets a unique response; verify summaries arrive in order.
 	var diff strings.Builder
 	for i := 0; i < 5; i++ {
 		diff.WriteString(fmt.Sprintf("diff --git a/file%d.go b/file%d.go\n", i, i))
@@ -395,7 +376,6 @@ func TestMapReduce_PreservesChunkOrder(t *testing.T) {
 		git: &fakeGit{diff: diff.String()},
 		llm: &fakeLLM{
 			onGenerate: func(p string) {
-				// Capture the synthesis prompt which contains all summaries.
 				if strings.Contains(p, "commit message") {
 					mu.Lock()
 					synthPrompt = p
@@ -435,8 +415,7 @@ func TestMapReduce_PartialChunkError_ReturnsError(t *testing.T) {
 		git: &fakeGit{diff: diff.String()},
 		llm: &fakeLLM{
 			onGenerate: func(string) { callCount.Add(1) },
-			// All calls fail — guarantees at least one error is captured.
-			err: fmt.Errorf("network timeout"),
+			err:        fmt.Errorf("network timeout"),
 		},
 		chunkThreshold: 300,
 		log:            noopLogger(),

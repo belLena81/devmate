@@ -9,8 +9,6 @@ import (
 	"devmate/internal/domain"
 )
 
-// fakeCache is an in-memory Cache for service tests.
-// Records call counts so tests can assert caching behaviour without disk I/O.
 type fakeCache struct {
 	store    map[string]string
 	setCalls int
@@ -73,8 +71,8 @@ func TestDraftMessage_CacheHit_DoesNotCallLLM(t *testing.T) {
 		log:   noopLogger(),
 	}
 
-	svc.DraftMessage(context.Background(), CommitOptions{})                // miss — populates cache
-	result, err := svc.DraftMessage(context.Background(), CommitOptions{}) // hit
+	svc.DraftMessage(context.Background(), CommitOptions{})
+	result, err := svc.DraftMessage(context.Background(), CommitOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error on cache hit: %v", err)
 	}
@@ -274,7 +272,6 @@ func TestDraftPrDescription_NewCommitAdded_CacheMiss(t *testing.T) {
 	makeService([]string{"feat: one", "feat: two"}).DraftPrDescription(context.Background(),
 		PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"},
 	)
-	// A new commit was added — different input, must miss.
 	makeService([]string{"feat: one", "feat: two", "feat: three"}).DraftPrDescription(context.Background(),
 		PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"},
 	)
@@ -286,8 +283,6 @@ func TestDraftPrDescription_NewCommitAdded_CacheMiss(t *testing.T) {
 
 // ─── NoCache flag ─────────────────────────────────────────────────────────────
 
-// When NoCache is true the cache Get must be skipped entirely — the LLM is
-// called even when a cached entry exists for the same key.
 func TestDraftMessage_NoCache_SkipsCacheGet(t *testing.T) {
 	cache := newFakeCache()
 	llmCalls := 0
@@ -299,27 +294,22 @@ func TestDraftMessage_NoCache_SkipsCacheGet(t *testing.T) {
 		log:   noopLogger(),
 	}
 
-	// Prime the cache with a normal call.
 	svc.DraftMessage(context.Background(), CommitOptions{})
 	if llmCalls != 1 {
 		t.Fatalf("expected 1 LLM call to prime cache, got %d", llmCalls)
 	}
 
-	// A second call without NoCache must hit the cache.
 	svc.DraftMessage(context.Background(), CommitOptions{})
 	if llmCalls != 1 {
 		t.Fatalf("expected cache hit (still 1 LLM call), got %d", llmCalls)
 	}
 
-	// A call with NoCache must bypass the cache and call the LLM again.
 	svc.DraftMessage(context.Background(), CommitOptions{Options: domain.Options{NoCache: true}})
 	if llmCalls != 2 {
 		t.Errorf("NoCache must force a fresh LLM call, got %d total LLM calls (want 2)", llmCalls)
 	}
 }
 
-// When NoCache is true the fresh LLM response must overwrite the cached entry
-// so subsequent normal calls serve the updated value.
 func TestDraftMessage_NoCache_OverwritesCachedEntry(t *testing.T) {
 	cache := newFakeCache()
 	responses := []string{"feat: original", "feat: refreshed"}
@@ -331,19 +321,16 @@ func TestDraftMessage_NoCache_OverwritesCachedEntry(t *testing.T) {
 		log:   noopLogger(),
 	}
 
-	// Prime cache.
 	r1, _ := svc.DraftMessage(context.Background(), CommitOptions{})
 	if r1 != "feat: original" {
 		t.Fatalf("expected first response %q, got %q", "feat: original", r1)
 	}
 
-	// NoCache call — must call LLM and overwrite cache.
 	r2, _ := svc.DraftMessage(context.Background(), CommitOptions{Options: domain.Options{NoCache: true}})
 	if r2 != "feat: refreshed" {
 		t.Fatalf("expected refreshed response %q, got %q", "feat: refreshed", r2)
 	}
 
-	// Normal call after NoCache — must now serve the refreshed value from cache.
 	r3, _ := svc.DraftMessage(context.Background(), CommitOptions{})
 	if r3 != "feat: refreshed" {
 		t.Errorf("cache should hold refreshed value %q, got %q", "feat: refreshed", r3)
@@ -366,13 +353,11 @@ func TestDraftBranchName_NoCache_SkipsCacheGet(t *testing.T) {
 		t.Fatalf("expected 1 LLM call to prime cache, got %d", llmCalls)
 	}
 
-	// Cache hit — LLM must not be called.
 	svc.DraftBranchName(context.Background(), opts)
 	if llmCalls != 1 {
 		t.Fatalf("expected cache hit, got %d LLM calls", llmCalls)
 	}
 
-	// NoCache — LLM must be called again.
 	noCacheOpts := BranchOptions{Task: "add auth", Options: domain.Options{NoCache: true}}
 	svc.DraftBranchName(context.Background(), noCacheOpts)
 	if llmCalls != 2 {
@@ -397,13 +382,11 @@ func TestDraftPrDescription_NoCache_SkipsCacheGet(t *testing.T) {
 		t.Fatalf("expected 1 LLM call to prime cache, got %d", llmCalls)
 	}
 
-	// Cache hit.
 	svc.DraftPrDescription(context.Background(), opts)
 	if llmCalls != 1 {
 		t.Fatalf("expected cache hit, got %d LLM calls", llmCalls)
 	}
 
-	// NoCache — must bypass cache.
 	noCacheOpts := PrOptions{
 		SourceBranch:      "feature/x",
 		DestinationBranch: "main",
@@ -415,8 +398,6 @@ func TestDraftPrDescription_NoCache_SkipsCacheGet(t *testing.T) {
 	}
 }
 
-// sequenceLLM returns responses from a pre-defined list in order.
-// Used when tests need distinct responses per LLM call.
 type sequenceLLM struct {
 	mu        sync.Mutex
 	responses []string
@@ -435,8 +416,6 @@ func (s *sequenceLLM) Generate(_ context.Context, _ string) (string, error) {
 }
 
 func TestCache_CommitAndBranch_DoNotShareEntries(t *testing.T) {
-	// Both commands receive identical content strings — keys must still differ
-	// because they incorporate different template hashes.
 	cache := newFakeCache()
 	llmCalls := 0
 	svc := Service{

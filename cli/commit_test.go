@@ -3,25 +3,19 @@ package cli
 import (
 	"bytes"
 	"devmate/internal/domain"
-	"devmate/internal/service"
 	"errors"
 	"strings"
 	"testing"
 )
 
-// newCommitApp returns a minimal App suitable for commit command tests.
-// The fake service returns an empty response by default.
 func newCommitApp(svc CommitService) *App {
 	app := &App{commitService: svc}
 	app.rootCmd = buildRootCmd(app)
 	return app
 }
 
-// TestCommitCmd_NilService_ReturnsErrServiceNotInitialized guards against a
-// nil-pointer panic when commitService has not been wired in yet. This mirrors
-// the equivalent check that exists in branch.go and pr.go.
 func TestCommitCmd_NilService_ReturnsErrServiceNotInitialized(t *testing.T) {
-	app := &App{} // all services nil
+	app := &App{}
 	app.rootCmd = buildRootCmd(app)
 	app.rootCmd.SetArgs([]string{"commit"})
 
@@ -283,8 +277,6 @@ func TestCommitCmd_WithoutNoCacheFlag_NoCacheIsFalse(t *testing.T) {
 	}
 }
 
-// Verify that two App instances running the commit command concurrently do not
-// share flag state.
 func TestCommitCmd_TwoApps_IndependentFlagState(t *testing.T) {
 	fake1 := &fakeCommitService{}
 	fake2 := &fakeCommitService{}
@@ -308,8 +300,4 @@ func TestCommitCmd_TwoApps_IndependentFlagState(t *testing.T) {
 	if fake2.options.Type != domain.Fix {
 		t.Errorf("app2: expected Fix, got %v", fake2.options.Type)
 	}
-
-	// Confirm the options reported by each service never cross-contaminated.
-	var zeroOpts service.CommitOptions
-	_ = zeroOpts // silence unused-variable warning; the real check is above
 }

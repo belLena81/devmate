@@ -53,8 +53,6 @@ func TestBuildCacheKey_DifferentExplain_DifferentKey(t *testing.T) {
 }
 
 func TestBuildCacheKey_DifferentTemplate_DifferentKey(t *testing.T) {
-	// commitTmplHash vs branchTmplHash — edit commit.tmpl → commit keys change,
-	// branch keys are unaffected.
 	k1 := buildCacheKey(commitTmplHash, "model", "content", "", "short", "false")
 	k2 := buildCacheKey(branchTmplHash, "model", "content", "", "short", "false")
 	if k1 == k2 {
@@ -63,8 +61,6 @@ func TestBuildCacheKey_DifferentTemplate_DifferentKey(t *testing.T) {
 }
 
 func TestBuildCacheKey_NoCollision_AdjacentFieldConcat(t *testing.T) {
-	// Without length-prefixing, "feat"+"fix" == "fe"+"atfix".
-	// Length-prefixed encoding prevents this.
 	k1 := buildCacheKey(commitTmplHash, "model", "diff", "feat", "fix", "false")
 	k2 := buildCacheKey(commitTmplHash, "model", "diff", "fe", "atfix", "false")
 	if k1 == k2 {
@@ -90,8 +86,6 @@ func TestPrCacheKey_SameBinaryHash_SameKey(t *testing.T) {
 	}
 }
 
-// Symmetry check: commit, branch, and pr cache-key helpers all incorporate
-// binaryHash so a binary upgrade invalidates all three command caches.
 func TestCacheKey_AllVariants_IncludeBinaryHash(t *testing.T) {
 	commits := []string{"feat: thing"}
 	old := "old-binary"

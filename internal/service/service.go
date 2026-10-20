@@ -14,21 +14,14 @@ import (
 	"time"
 )
 
-// parallelResult carries the ordered output of one parallel task.
 type parallelResult[T any] struct {
 	idx int
 	val T
 	err error
 }
 
-// parallelDo runs fn on each element of tasks concurrently with at most
-// maxWorkers goroutines alive at once (worker-pool pattern). Results are
-// returned in the original order. On the first error, remaining queued tasks
-// are abandoned via context cancellation.
-//
-// This replaces the previous fan-out pattern that spawned len(tasks) goroutines
-// up-front and used a semaphore to gate execution. With n=100 and concurrency=2,
-// the old pattern kept 98 blocked goroutines in memory; this keeps exactly 2.
+// parallelDo runs fn on each task with at most maxWorkers goroutines and
+// returns results in input order. The first error cancels the remaining tasks.
 func parallelDo[In, Out any](
 	ctx context.Context,
 	maxWorkers int,
@@ -42,7 +35,6 @@ func parallelDo[In, Out any](
 
 	workers := min(n, maxWorkers)
 
-	// Pre-fill a buffered work channel so workers never block on send.
 	work := make(chan int, n)
 	for i := range tasks {
 		work <- i
@@ -66,14 +58,13 @@ func parallelDo[In, Out any](
 				out, err := fn(cancelCtx, idx, tasks[idx])
 				results <- parallelResult[Out]{idx: idx, val: out, err: err}
 				if err != nil {
-					cancel() // signal remaining workers to stop
+					cancel()
 					return
 				}
 			}
 		}()
 	}
 
-	// Close results as soon as all workers finish so the collector loop below exits.
 	go func() {
 		wg.Wait()
 		close(results)
@@ -82,8 +73,7 @@ func parallelDo[In, Out any](
 	out := make([]Out, n)
 	for r := range results {
 		if r.err != nil {
-			// Drain remaining in-flight results so blocked workers can send
-			// and exit; we discard them since we're returning an error.
+			// Drain so in-flight workers can send and exit.
 			go func() {
 				for range results {
 				}
@@ -98,31 +88,26 @@ func parallelDo[In, Out any](
 type Service struct {
 	git            domain.GitClient
 	llm            domain.LLM
-	cache          Cache           // optional — nil is safe, treated as NoopCache
-	progress       domain.Progress // optional — nil is safe, treated as NoopProgress
-	model          string          // included in cache keys to isolate responses per model
+	cache          Cache           // optional, nil means NoopCache
+	progress       domain.Progress // optional, nil means NoopProgress
+	model          string
 	log            *slog.Logger
 	chunkThreshold int
-	maxConcurrency int           // max parallel LLM calls; 0 or negative means runtime.NumCPU()
-	binaryHash     string        // included in cache keys so a new binary never serves stale entries
-	maxRetries     int           // retry attempts for transient LLM errors; 0 means a single attempt
-	retryBaseDelay time.Duration // initial back-off between retries; 0 uses defaultRetryBaseDelay
+	maxConcurrency int // 0 means runtime.NumCPU()
+	binaryHash     string
+	maxRetries     int           // 0 means a single attempt
+	retryBaseDelay time.Duration // 0 means config.DefaultRetryBaseDelay
 }
 
-// Settings is a functional settings for configuring a Service at
-// construction time. Using settings instead of post-construction field mutation
-// keeps the Service immutable after New() returns and makes the call site in
-// main.go self-documenting.
+// Settings configures a Service at construction time.
 type Settings func(*Service)
 
 // WithProgress attaches a progress reporter to the service.
-// When not provided, a no-op reporter is used.
 func WithProgress(p domain.Progress) Settings {
 	return func(s *Service) { s.progress = p }
 }
 
-// WithChunkThreshold overrides the diff-size threshold above which map-reduce
-// chunking is used. Must be a positive value; zero is ignored (keeps default).
+// WithChunkThreshold overrides the diff size above which map-reduce chunking is used.
 func WithChunkThreshold(n int) Settings {
 	return func(s *Service) {
 		if n > 0 {
@@ -131,9 +116,7 @@ func WithChunkThreshold(n int) Settings {
 	}
 }
 
-// WithMaxConcurrency overrides the maximum number of parallel llm calls.
-// Zero or negative is ignored (keeps default; runtime.NumCPU() is used at
-// call time).
+// WithMaxConcurrency overrides the maximum number of parallel LLM calls.
 func WithMaxConcurrency(n int) Settings {
 	return func(s *Service) {
 		if n > 0 {
@@ -142,14 +125,12 @@ func WithMaxConcurrency(n int) Settings {
 	}
 }
 
-// WithMaxRetries sets the number of retry attempts for transient llm errors.
-// Zero means a single attempt (no retries), which is the default.
+// WithMaxRetries sets the number of retries after a failed LLM call. Negative values mean zero.
 func WithMaxRetries(n int) Settings {
-	return func(s *Service) { s.maxRetries = n }
+	return func(s *Service) { s.maxRetries = max(n, 0) }
 }
 
-// WithRetryBaseDelay sets the initial exponential back-off delay between
-// retries. Zero is ignored (keeps the package default of 2 s).
+// WithRetryBaseDelay sets the initial exponential back-off delay between retries.
 func WithRetryBaseDelay(d time.Duration) Settings {
 	return func(s *Service) {
 		if d > 0 {
@@ -158,9 +139,7 @@ func WithRetryBaseDelay(d time.Duration) Settings {
 	}
 }
 
-// New constructs a Service with sensible defaults. Pass Settings values
-// to override any field — this is the only supported way to configure the
-// service after the constructor returns.
+// New constructs a Service with defaults, overridden by opts.
 func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *slog.Logger, opts ...Settings) *Service {
 	svc := &Service{
 		git:            git,
@@ -178,7 +157,6 @@ func New(git domain.GitClient, llm domain.LLM, cache Cache, model string, log *s
 	return svc
 }
 
-// concurrency returns the effective concurrency limit.
 func (s *Service) concurrency() int {
 	if s.maxConcurrency > 0 {
 		return s.maxConcurrency
@@ -203,8 +181,6 @@ func (s *Service) MaxRetries() int {
 }
 
 // Cache returns the configured cache, or NoopCache when nil.
-// Makes cache an optional field: tests that omit it get safe no-op behaviour
-// with no nil dereference risk.
 func (s *Service) Cache() Cache {
 	if s.cache == nil {
 		return NoopCache{}
@@ -220,8 +196,7 @@ func (s *Service) Log() *slog.Logger {
 	return s.log
 }
 
-// RetryBaseDelay returns the configured base delay, falling back to the
-// package default when the field is zero (i.e. not explicitly set).
+// RetryBaseDelay returns the configured base delay, or config.DefaultRetryBaseDelay when unset.
 func (s *Service) RetryBaseDelay() time.Duration {
 	if s.retryBaseDelay > 0 {
 		return s.retryBaseDelay
@@ -233,15 +208,9 @@ func (s *Service) Git() domain.GitClient {
 	return s.git
 }
 
-// GenerateWithRetry calls s.llm.Generate and retries up to s.MaxRetries times
-// on failure with exponential back-off. MaxRetries=0 means a single attempt.
-//
-// This is the single retry site in the application. The LLM client (OllamaClient)
-// makes exactly one HTTP attempt per call; all retry logic lives here so the
-// total number of attempts is always MaxRetries+1, never multiplied.
-//
-// ctx is forwarded to every LLM call. A cancelled or expired context
-// short-circuits immediately without further retries.
+// GenerateWithRetry calls the LLM with exponential back-off, making at most
+// MaxRetries+1 attempts. On exhaustion the returned error wraps both
+// domain.ErrLLMNoAttemptsSucceed and the last underlying error.
 func (s *Service) GenerateWithRetry(ctx context.Context, prompt string) (string, error) {
 	if s.llm == nil {
 		return "", domain.ErrLLMNoConfigured
@@ -249,6 +218,7 @@ func (s *Service) GenerateWithRetry(ctx context.Context, prompt string) (string,
 	attempts := s.maxRetries + 1
 	delay := s.RetryBaseDelay()
 
+	var lastErr error
 	for i := 0; i < attempts; i++ {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
@@ -271,15 +241,14 @@ func (s *Service) GenerateWithRetry(ctx context.Context, prompt string) (string,
 		if err == nil {
 			return result, nil
 		}
-
-		// Don't retry on context cancellation — the caller gave up.
 		if ctx.Err() != nil {
 			return "", err
 		}
 
+		lastErr = err
 		s.Log().Debug("llm generate failed", "attempt", i+1, "of", attempts, "error", err)
 	}
-	return "", domain.ErrLLMNoAttemptsSucceed
+	return "", fmt.Errorf("%w: %w", domain.ErrLLMNoAttemptsSucceed, lastErr)
 }
 
 type CommitOptions struct {
@@ -307,13 +276,11 @@ func (s *Service) mapReducePr(ctx context.Context, commits []string, options PrO
 		"threshold", s.ChunkThreshold(),
 	)
 
-	// Map phase: summarize each chunk of commits in parallel.
 	summaries, err := s.summarizeChunksParallel(ctx, chunks)
 	if err != nil {
 		return "", err
 	}
 
-	// Hierarchically reduce summaries until they fit within the threshold.
 	summaries, err = s.reduceSummaries(ctx, summaries)
 	if err != nil {
 		return "", err
@@ -341,13 +308,11 @@ func (s *Service) mapReduce(ctx context.Context, diff string, options CommitOpti
 		"threshold", s.ChunkThreshold(),
 	)
 
-	// Map phase: summarize all chunks in parallel.
 	summaries, err := s.summarizeChunksParallel(ctx, chunks)
 	if err != nil {
 		return "", err
 	}
 
-	// Hierarchically reduce summaries until they fit within the threshold.
 	summaries, err = s.reduceSummaries(ctx, summaries)
 	if err != nil {
 		return "", err
@@ -366,9 +331,6 @@ func (s *Service) mapReduce(ctx context.Context, diff string, options CommitOpti
 	return result, nil
 }
 
-// summarizeChunksParallel sends all chunk prompts to the LLM concurrently
-// (up to s.concurrency() at a time) and returns the summaries in their
-// original order. It returns the first error encountered (if any).
 func (s *Service) summarizeChunksParallel(ctx context.Context, chunks []Chunk) ([]string, error) {
 	n := len(chunks)
 	var completed atomic.Int64
@@ -395,10 +357,7 @@ func (s *Service) summarizeChunksParallel(ctx context.Context, chunks []Chunk) (
 	)
 }
 
-// reduceSummaries iteratively condenses summaries in groups until their
-// combined size fits within ChunkThreshold. Each iteration packs summaries
-// into groups that fit the threshold, sends each group to the LLM in parallel
-// for condensation, and replaces the list with the condensed results.
+// reduceSummaries condenses summaries in parallel groups until they fit within ChunkThreshold.
 func (s *Service) reduceSummaries(ctx context.Context, summaries []string) ([]string, error) {
 	for {
 		total := summariesSize(summaries)
@@ -448,7 +407,6 @@ func (s *Service) reduceSummaries(ctx context.Context, summaries []string) ([]st
 	}
 }
 
-// summariesSize returns the total byte length of all summaries.
 func summariesSize(summaries []string) int {
 	n := 0
 	for _, s := range summaries {
@@ -457,15 +415,13 @@ func summariesSize(summaries []string) int {
 	return n
 }
 
-// groupSummaries packs summaries into groups whose combined size does not
-// exceed maxSize. Each group will be sent to the llm as one reduce call.
+// groupSummaries packs summaries into groups of at most maxSize bytes.
 func groupSummaries(summaries []string, maxSize int) [][]string {
 	var groups [][]string
 	var current []string
 	currentSize := 0
 
 	for _, s := range summaries {
-		// If a single summary exceeds maxSize, it gets its own group.
 		if len(s) > maxSize {
 			if len(current) > 0 {
 				groups = append(groups, current)
@@ -630,7 +586,6 @@ func (s *Service) DraftPrDescription(ctx context.Context, o PrOptions) (string, 
 }
 
 // NoopCache is a Cache that never stores anything.
-// Used when caching is disabled and as the zero-value fallback via cache().
 type NoopCache struct{}
 
 func (NoopCache) Get(string) (string, bool) { return "", false }

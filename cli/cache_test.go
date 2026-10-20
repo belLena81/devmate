@@ -12,8 +12,6 @@ import (
 
 // ─── Test doubles ─────────────────────────────────────────────────────────────
 
-// fakeCacheService is an in-memory CacheService for CLI tests.
-// It records whether Clean was called and returns a configurable Stat result.
 type fakeCacheService struct {
 	entries    []service.CacheEntry
 	cleanErr   error
@@ -30,7 +28,6 @@ func (f *fakeCacheService) Stat() ([]service.CacheEntry, error) {
 	return f.entries, f.statErr
 }
 
-// newCacheApp returns a minimal App suitable for cache command tests.
 func newCacheApp(svc CacheService) *App {
 	app := &App{cacheService: svc}
 	app.rootCmd = buildRootCmd(app)
@@ -160,8 +157,6 @@ func TestCacheStatCmd_PrintsOneLinePerEntry(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Count non-empty lines (header + 3 data lines, or just 3 data lines —
-	// either is acceptable as long as every entry appears).
 	output := buf.String()
 	for _, entry := range entries {
 		if !strings.Contains(output, entry.Key) {

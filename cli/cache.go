@@ -9,13 +9,9 @@ import (
 )
 
 // CacheService is the interface the cache subcommands require.
-// It is satisfied by *service.diskCache (via a thin adapter) and by
-// fakeCacheService in tests.
 type CacheService interface {
-	// Clean removes all cached entries.
 	Clean() error
-	// Stat returns metadata for every entry currently in the cache,
-	// sorted by modification time, newest first.
+	// Stat returns every cache entry, newest first.
 	Stat() ([]service.CacheEntry, error)
 }
 

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"devmate/internal/config"
+	"devmate/internal/domain"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,8 +14,7 @@ import (
 
 // ─── countingLLM ────────────────────────────────────────────────────────────
 
-// countingLLM fails the first `failTimes` calls then succeeds.
-// Thread-safe via atomic counter.
+// countingLLM fails the first failTimes calls, then succeeds.
 type countingLLM struct {
 	failTimes int32
 	calls     atomic.Int32
@@ -29,9 +29,6 @@ func (c *countingLLM) Generate(_ context.Context, prompt string) (string, error)
 	return c.response, nil
 }
 
-// testRetryDelay is a negligible delay used in retry tests so that back-off
-// sleeps do not slow down the test suite. Production code uses defaultRetryBaseDelay
-// (2 s), which would make exhausted-retry tests take 6+ seconds each.
 const testRetryDelay = time.Millisecond
 
 func TestGenerateWithRetry_NilLLM_ReturnsError(t *testing.T) {
@@ -45,12 +42,10 @@ func TestGenerateWithRetry_NilLLM_ReturnsError(t *testing.T) {
 		_, err = svc.GenerateWithRetry(context.Background(), "prompt")
 	})
 	if err == nil {
-		t.Error("generateWithRetry with nil LLM must return an error, not panic")
+		t.Error("GenerateWithRetry with nil LLM must return an error, not panic")
 	}
 }
 
-// requireNoPanicService is a local copy of the helper to avoid cross-package
-// dependency while keeping the test self-contained.
 func requireNoPanicService(t *testing.T, fn func()) {
 	t.Helper()
 	defer func() {
@@ -64,7 +59,6 @@ func requireNoPanicService(t *testing.T, fn func()) {
 // ─── PR: mapReducePr ────────────────────────────────────────────────────────
 
 func TestDraftPrDescription_ChunkedCommits_UsesMapReduce(t *testing.T) {
-	// Build commits whose joined size exceeds the threshold.
 	commits := make([]string, 10)
 	for i := range commits {
 		commits[i] = fmt.Sprintf("feat: change %s", strings.Repeat("x", 60))
@@ -88,7 +82,6 @@ func TestDraftPrDescription_ChunkedCommits_UsesMapReduce(t *testing.T) {
 	if result == "" {
 		t.Error("expected non-empty result from map-reduce PR")
 	}
-	// Must have at least 2 calls: chunk summaries + synthesis.
 	if callCount.Load() < 2 {
 		t.Errorf("expected at least 2 LLM calls for chunked PR, got %d", callCount.Load())
 	}
@@ -119,8 +112,6 @@ func TestDraftPrDescription_SmallCommits_SingleLLMCall(t *testing.T) {
 }
 
 func TestDraftPrDescription_ReturnsResultAfterSingleCall(t *testing.T) {
-	// Regression: the original code had a shadowed :=  variable bug that
-	// caused DraftPrDescription to always return "" for non-chunked paths.
 	svc := Service{
 		git: &fakeGit{commits: []string{"feat: add login"}},
 		llm: &fakeLLM{response: "## PR description text"},
@@ -206,13 +197,13 @@ func TestDraftPrDescription_MapReduce_CachesResult(t *testing.T) {
 	}
 
 	opts := PrOptions{SourceBranch: "feature/x", DestinationBranch: "main"}
-	_, err := svc.DraftPrDescription(context.Background(), opts) // miss
+	_, err := svc.DraftPrDescription(context.Background(), opts)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 	firstCalls := llmCalls.Load()
 
-	_, err = svc.DraftPrDescription(context.Background(), opts) // should hit cache
+	_, err = svc.DraftPrDescription(context.Background(), opts)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -225,9 +216,7 @@ func TestDraftPrDescription_MapReduce_CachesResult(t *testing.T) {
 // ─── Branch: long task truncation / guard ──────────────────────────────────
 
 func TestDraftBranchName_LongTask_StillReturnsResult(t *testing.T) {
-	// Branch command receives a very long user task description.
-	// Service should handle it without panicking or returning an error.
-	longTask := strings.Repeat("add feature for user management system ", 200) // ~7600 chars
+	longTask := strings.Repeat("add feature for user management system ", 200)
 	svc := Service{
 		llm:            &fakeLLM{response: "feat/user-management"},
 		log:            noopLogger(),
@@ -297,6 +286,12 @@ func TestDraftMessage_Retry_ExhaustedReturnsError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error after exhausting retries")
 	}
+	if !errors.Is(err, domain.ErrLLMNoAttemptsSucceed) {
+		t.Errorf("expected ErrLLMNoAttemptsSucceed, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "transient error on attempt 3") {
+		t.Errorf("expected last underlying error to be wrapped, got: %v", err)
+	}
 }
 
 func TestDraftMessage_Retry_ZeroRetries_FailsImmediately(t *testing.T) {
@@ -305,7 +300,7 @@ func TestDraftMessage_Retry_ZeroRetries_FailsImmediately(t *testing.T) {
 		git:            &fakeGit{diff: "some diff"},
 		llm:            llm,
 		log:            noopLogger(),
-		maxRetries:     0, // no retries — first failure is final
+		maxRetries:     0,
 		retryBaseDelay: testRetryDelay,
 	}
 

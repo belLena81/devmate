@@ -10,15 +10,13 @@ import (
 	"strings"
 )
 
-// Runner executes git commands in a specific working directory.
-// It implements domain.GitClient.
+// Runner executes git commands in a working directory; it implements domain.GitClient.
 type Runner struct {
 	dir string
 	log *slog.Logger
 }
 
-// New returns a Runner rooted at dir. Pass an empty string to use the
-// current working directory.
+// New returns a Runner rooted at dir, or the current working directory when dir is empty.
 func New(dir string, log *slog.Logger) *Runner {
 	return &Runner{
 		dir: dir,
@@ -35,10 +33,6 @@ func RepoRoot() (string, error) {
 }
 
 // DiffCached returns the staged diff, ignoring whitespace-only changes.
-// -w (--ignore-all-space) tells git to omit hunks whose only differences are
-// spaces, tabs, or indentation shifts. This prevents alignment-only reformats
-// from inflating the diff and consuming LLM context.
-// Returns an empty string (and no error) when nothing of substance is staged.
 func (r *Runner) DiffCached() (string, error) {
 	r.log.Debug("running diff --cached")
 	out, err := r.run("diff", "--cached", "-w")
@@ -50,8 +44,7 @@ func (r *Runner) DiffCached() (string, error) {
 	return out, nil
 }
 
-// validRef returns an error if the string is not a plausible git ref name.
-// This guards against option injection (refs starting with "-").
+// validRef rejects refs starting with "-" to guard against git option injection.
 func validRef(ref string) error {
 	if strings.HasPrefix(ref, "-") {
 		return fmt.Errorf("%w %q: ref names may not start with '-'", domain.ErrInvalidRef, ref)
@@ -62,10 +55,7 @@ func validRef(ref string) error {
 	return nil
 }
 
-// LogBetween returns the commit subject lines that exist in head but not in
-// base, excluding merge commits. This is used to gather PR context for LLM
-// summarisation without noise from merge-back commits.
-// Returns an empty slice (and no error) when base and head are identical.
+// LogBetween returns the subjects of commits in head but not in base, excluding merges.
 func (r *Runner) LogBetween(base, head string) ([]string, error) {
 	if err := validRef(base); err != nil {
 		return nil, err
@@ -95,9 +85,6 @@ func (r *Runner) LogBetween(base, head string) ([]string, error) {
 	return msgs, nil
 }
 
-// run executes a git subcommand in r.dir and returns stdout.
-// stderr is captured and included in the error message on failure so
-// callers get actionable context without needing to inspect os.Stderr.
 func (r *Runner) run(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = r.dir
@@ -118,8 +105,7 @@ func (r *Runner) run(args ...string) (string, error) {
 	return stdout.String(), nil
 }
 
-// filteredEnv returns os.Environ() with all GIT_* variables removed.
-// This prevents the caller's git context from leaking into subprocesses.
+// filteredEnv returns os.Environ() without GIT_* variables so the caller's git context cannot leak into subprocesses.
 func filteredEnv() []string {
 	env := os.Environ()
 	filtered := make([]string, 0, len(env))

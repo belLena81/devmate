@@ -17,9 +17,7 @@ type App struct {
 	cacheService  CacheService
 }
 
-// NewApp constructs the CLI application wired to the given LLM.
-// The git runner is resolved from the working directory.
-// Caching is disabled — use NewAppWithService for full wiring including cache.
+// NewApp constructs the CLI application wired to llm, with caching disabled.
 func NewApp(llm domain.LLM) (*App, error) {
 	log := slog.Default()
 
@@ -34,15 +32,11 @@ func NewApp(llm domain.LLM) (*App, error) {
 	return newAppFromService(svc), nil
 }
 
-// NewAppWithService constructs the CLI application from a fully wired service.
-// This is the production path used by main.go (includes cache and model name).
-// The git client must already be set on svc before calling this function;
-// NewAppWithService never modifies the service it receives.
+// NewAppWithService constructs the CLI application from a fully wired service without modifying it.
 func NewAppWithService(svc *service.Service) (*App, error) {
 	return newAppFromService(svc), nil
 }
 
-// newAppFromService wires the given service into an App.
 func newAppFromService(svc *service.Service) *App {
 	app := &App{
 		commitService: svc,
@@ -78,10 +72,6 @@ func InjectCacheService(app *App, svc CacheService) {
 	app.cacheService = svc
 }
 
-// cacheSvcAdapter bridges service.Cache (Clean) and service.CacheInspector
-// (Stat) to the CacheService interface required by the CLI commands.
-// If the underlying Cache does not implement CacheInspector (e.g. a custom
-// implementation that predates the interface), Stat returns an empty list.
 type cacheSvcAdapter struct {
 	cache service.Cache
 }

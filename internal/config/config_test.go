@@ -10,7 +10,6 @@ import (
 )
 
 func TestLoad_Defaults(t *testing.T) {
-	// Point at a non-existent file so we exercise the defaults path.
 	t.Setenv("DEVMATE_CONFIG", filepath.Join(t.TempDir(), "nonexistent.json"))
 
 	cfg, err := config.Load()
@@ -183,7 +182,6 @@ func TestLoad_InvalidIntEnvVar_ReturnsError(t *testing.T) {
 		t.Run(tc.envKey, func(t *testing.T) {
 			t.Setenv(tc.envKey, tc.envVal)
 
-			// Must not panic — must return a non-nil error.
 			var cfg config.Config
 			var err error
 			requireNoPanic(t, func() {
@@ -197,7 +195,6 @@ func TestLoad_InvalidIntEnvVar_ReturnsError(t *testing.T) {
 	}
 }
 
-// requireNoPanic runs fn and fails the test if it panics.
 func requireNoPanic(t *testing.T, fn func()) {
 	t.Helper()
 	defer func() {
@@ -208,7 +205,6 @@ func requireNoPanic(t *testing.T, fn func()) {
 	fn()
 }
 
-// writeTempConfig writes data as JSON to a temp file and returns its path.
 func writeTempConfig(t *testing.T, data any) string {
 	t.Helper()
 	b, err := json.Marshal(data)

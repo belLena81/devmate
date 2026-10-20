@@ -7,9 +7,6 @@ import (
 )
 
 // ─── Template smoke tests ─────────────────────────────────────────────────────
-// These verify that all three embedded templates parse and render without
-// panicking. A corrupt or missing template file would fail at compile time
-// (embed) or here at test time (mustRender).
 
 func TestTemplates_RenderWithoutPanic(t *testing.T) {
 	t.Run("commit", func(t *testing.T) {
@@ -100,7 +97,6 @@ func TestBuildCommitPrompt_ExplainMode_AsksForReasoning(t *testing.T) {
 func TestBuildCommitPrompt_NoExplain_DoesNotAskForReasoning(t *testing.T) {
 	opts := CommitOptions{domain.Options{Explain: false}}
 	prompt := BuildCommitPrompt("diff", opts)
-	// should not ask for explanation when not requested
 	if strings.Contains(prompt, "explain why") || strings.Contains(prompt, "reasoning") {
 		t.Errorf("expected no reasoning request when explain=false, got:\n%s", prompt)
 	}
